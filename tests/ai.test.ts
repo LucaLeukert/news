@@ -1,6 +1,6 @@
 import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
-import { z } from "../packages/ai/node_modules/zod";
+import { z } from "zod";
 import {
   StructuredAiLive,
   canPublishPublicAiOutput,
