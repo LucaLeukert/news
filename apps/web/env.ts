@@ -8,12 +8,14 @@ export const env = createEnv({
   },
   client: {
     NEXT_PUBLIC_API_BASE_URL: z.string().url().default("http://localhost:8787"),
+    NEXT_PUBLIC_CONVEX_URL: z.string().url().optional(),
     NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: z.string().optional(),
   },
   runtimeEnv: {
     CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY,
     CLERK_PRICE_ID_PRO: process.env.CLERK_PRICE_ID_PRO,
     NEXT_PUBLIC_API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL,
+    NEXT_PUBLIC_CONVEX_URL: process.env.NEXT_PUBLIC_CONVEX_URL,
     NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:
       process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
   },

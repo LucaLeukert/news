@@ -15,6 +15,7 @@ export const baseServerEnvSchema = {
   DATABASE_URL: z.string().url().optional(),
   R2_BUCKET: z.string().default("crawl-artifacts"),
   CONVEX_DEPLOYMENT: z.string().optional(),
+  NEXT_PUBLIC_CONVEX_URL: z.string().url().optional(),
   NEXT_PUBLIC_API_BASE_URL: z.string().url().default("http://localhost:8787"),
   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: z.string().optional(),
   CLERK_SECRET_KEY: z.string().optional(),

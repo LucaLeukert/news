@@ -5,6 +5,7 @@ export const serverEnvSchema = z.object({
   DATABASE_URL: z.string().url(),
   R2_BUCKET: z.string().default("crawl-artifacts"),
   CONVEX_DEPLOYMENT: z.string().optional(),
+  NEXT_PUBLIC_CONVEX_URL: z.string().url().optional(),
   LOCAL_MODEL_BASE_URL: z.string().url().default("http://localhost:11434/v1"),
   LOCAL_MODEL_NAME: z.string().default("gpt-oss-20b"),
 });

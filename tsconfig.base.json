@@ -50,5 +50,6 @@
       "@news/convex-sync": ["./packages/convex-sync/src/index.ts"]
     }
   },
+  "exclude": ["convex/_generated"],
   "$schema": "https://raw.githubusercontent.com/Effect-TS/language-service/refs/heads/main/schema.json"
 }

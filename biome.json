@@ -23,6 +23,7 @@
       ".turbo",
       "**/.turbo",
       ".next",
+      "convex/_generated",
       "dist",
       "bun.lock"
     ]

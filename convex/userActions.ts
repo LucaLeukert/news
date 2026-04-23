@@ -1,6 +1,6 @@
-import { mutationGeneric } from "convex/server";
 import { v } from "convex/values";
 import { Data, DateTime, Effect } from "effect";
+import { mutation } from "./_generated/server";
 
 const followTargetType = v.union(
   v.literal("topic"),
@@ -52,7 +52,7 @@ const requireUserId = (ctx: AuthenticatedCtx) =>
 
 const createdAt = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 
-export const follow = mutationGeneric({
+export const follow = mutation({
   args: {
     targetType: followTargetType,
     targetId: v.string(),
@@ -64,12 +64,11 @@ export const follow = mutationGeneric({
         const existing = yield* Effect.promise(() =>
           ctx.db
             .query("user_follows")
-            .filter((q) =>
-              q.and(
-                q.eq(q.field("externalUserId"), externalUserId),
-                q.eq(q.field("targetType"), args.targetType),
-                q.eq(q.field("targetId"), args.targetId),
-              ),
+            .withIndex("by_user_target", (q) =>
+              q
+                .eq("externalUserId", externalUserId)
+                .eq("targetType", args.targetType)
+                .eq("targetId", args.targetId),
             )
             .unique(),
         );
@@ -90,7 +89,7 @@ export const follow = mutationGeneric({
     ),
 });
 
-export const hideSource = mutationGeneric({
+export const hideSource = mutation({
   args: {
     sourceId: v.string(),
   },
@@ -101,11 +100,10 @@ export const hideSource = mutationGeneric({
         const existing = yield* Effect.promise(() =>
           ctx.db
             .query("user_hidden_sources")
-            .filter((q) =>
-              q.and(
-                q.eq(q.field("externalUserId"), externalUserId),
-                q.eq(q.field("sourceId"), args.sourceId),
-              ),
+            .withIndex("by_user_source", (q) =>
+              q
+                .eq("externalUserId", externalUserId)
+                .eq("sourceId", args.sourceId),
             )
             .unique(),
         );
@@ -125,7 +123,7 @@ export const hideSource = mutationGeneric({
     ),
 });
 
-export const hideTopic = mutationGeneric({
+export const hideTopic = mutation({
   args: {
     topic: v.string(),
   },
@@ -136,11 +134,8 @@ export const hideTopic = mutationGeneric({
         const existing = yield* Effect.promise(() =>
           ctx.db
             .query("user_hidden_topics")
-            .filter((q) =>
-              q.and(
-                q.eq(q.field("externalUserId"), externalUserId),
-                q.eq(q.field("topic"), args.topic),
-              ),
+            .withIndex("by_user_topic", (q) =>
+              q.eq("externalUserId", externalUserId).eq("topic", args.topic),
             )
             .unique(),
         );
@@ -160,7 +155,7 @@ export const hideTopic = mutationGeneric({
     ),
 });
 
-export const saveStory = mutationGeneric({
+export const saveStory = mutation({
   args: {
     storyId: v.string(),
   },
@@ -171,11 +166,10 @@ export const saveStory = mutationGeneric({
         const existing = yield* Effect.promise(() =>
           ctx.db
             .query("saved_stories")
-            .filter((q) =>
-              q.and(
-                q.eq(q.field("externalUserId"), externalUserId),
-                q.eq(q.field("storyId"), args.storyId),
-              ),
+            .withIndex("by_user_story", (q) =>
+              q
+                .eq("externalUserId", externalUserId)
+                .eq("storyId", args.storyId),
             )
             .unique(),
         );
@@ -195,7 +189,7 @@ export const saveStory = mutationGeneric({
     ),
 });
 
-export const deleteSavedStory = mutationGeneric({
+export const deleteSavedStory = mutation({
   args: {
     storyId: v.string(),
   },
@@ -206,11 +200,10 @@ export const deleteSavedStory = mutationGeneric({
         const existing = yield* Effect.promise(() =>
           ctx.db
             .query("saved_stories")
-            .filter((q) =>
-              q.and(
-                q.eq(q.field("externalUserId"), externalUserId),
-                q.eq(q.field("storyId"), args.storyId),
-              ),
+            .withIndex("by_user_story", (q) =>
+              q
+                .eq("externalUserId", externalUserId)
+                .eq("storyId", args.storyId),
             )
             .unique(),
         );
