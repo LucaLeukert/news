@@ -32,8 +32,8 @@ Use `docker compose up -d postgres model-mock` for local infrastructure.
 - `apps/admin`: internal operations console.
 - `apps/api`: Cloudflare Worker API gateway.
 - `services/*`: crawler, parser, clusterer, scheduler, and local AI runner.
-- `packages/shared`: Zod contracts, constants, taxonomy helpers, URL normalization.
-- `packages/types`: canonical shared domain types, Zod contracts, and value helpers.
+- `packages/shared`: shared Effect Schema contracts, constants, taxonomy helpers, and URL normalization.
+- `packages/types`: canonical shared domain types, Effect Schema contracts, and value helpers.
 - `packages/platform`: Effect runtime services for env, HTTP, metrics, auth, billing, AI, and logging.
 - `packages/db`: Drizzle schema and SQL migrations.
 - `packages/ai`: prompt versions, structured output schemas, model adapter.

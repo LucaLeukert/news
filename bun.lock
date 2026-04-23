@@ -182,7 +182,6 @@
       "version": "0.0.0",
       "dependencies": {
         "@news/types": "workspace:*",
-        "zod": "^3.24.3",
       },
       "devDependencies": {
         "typescript": "^5.8.3",
