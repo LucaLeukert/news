@@ -7,7 +7,7 @@ Coverage Lens separates public product surfaces from ingestion and review worklo
 - Vercel hosts `apps/web` and `apps/admin`.
 - Cloudflare Workers host `apps/api` and `services/scheduler`.
 - Neon/Postgres is canonical for sources, feeds, crawl state, articles, stories, AI jobs, AI results, ratings, metrics, and takedowns.
-- Convex stores user-facing projections only: follows, saved stories, hidden preferences, feed projection documents, and notifications.
+- Convex stores user-facing projections only: follows, saved stories, hidden preferences, feed projection documents, and notifications. Client interactions for those surfaces are Convex mutations, not Cloudflare API writes.
 - R2 stores raw crawl artifacts where legally allowed. Postgres stores hashes, keys, and metadata.
 - The local AI node polls outbound to `/internal/ai/jobs/lease` and posts versioned result envelopes back to `/internal/ai/jobs/:id/result`.
 - Effect services/layers provide the runtime boundary for HTTP, AI, logging, metrics, Clerk auth, billing, and fallbacks.

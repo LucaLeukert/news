@@ -432,12 +432,18 @@ Convex records should reference Postgres IDs, not duplicate canonical article/st
 - `POST /resolve-url`
   - accepts article URL, returns matching story or queues crawl.
 
-### User APIs
+### Frontend User Actions
 
-- `POST /user/follow`
-- `POST /user/hide`
-- `POST /user/save-story`
-- `DELETE /user/save-story/:id`
+- Convex mutation `userActions.follow`
+- Convex mutation `userActions.hideSource`
+- Convex mutation `userActions.hideTopic`
+- Convex mutation `userActions.saveStory`
+- Convex mutation `userActions.deleteSavedStory`
+
+Client-facing follows, hides, saved stories, notifications, and feed
+projections are handled through Convex. Backend API routes stay focused on
+Postgres-backed reads, crawl queues, AI jobs, source policy, and compliance
+workflows.
 
 ### Internal APIs
 

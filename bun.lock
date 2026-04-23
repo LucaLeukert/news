@@ -115,6 +115,7 @@
       "name": "@news/convex-sync",
       "version": "0.0.0",
       "dependencies": {
+        "@news/types": "workspace:*",
         "effect": "4.0.0-beta.56",
       },
       "devDependencies": {

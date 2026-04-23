@@ -18,22 +18,30 @@ export default defineSchema({
     ),
     targetId: v.string(),
     createdAt: v.string(),
-  }).index("by_user", ["externalUserId"]),
+  })
+    .index("by_user", ["externalUserId"])
+    .index("by_user_target", ["externalUserId", "targetType", "targetId"]),
   user_hidden_sources: defineTable({
     externalUserId: v.string(),
     sourceId: v.string(),
     createdAt: v.string(),
-  }).index("by_user", ["externalUserId"]),
+  })
+    .index("by_user", ["externalUserId"])
+    .index("by_user_source", ["externalUserId", "sourceId"]),
   user_hidden_topics: defineTable({
     externalUserId: v.string(),
     topic: v.string(),
     createdAt: v.string(),
-  }).index("by_user", ["externalUserId"]),
+  })
+    .index("by_user", ["externalUserId"])
+    .index("by_user_topic", ["externalUserId", "topic"]),
   saved_stories: defineTable({
     externalUserId: v.string(),
     storyId: v.string(),
     createdAt: v.string(),
-  }).index("by_user", ["externalUserId"]),
+  })
+    .index("by_user", ["externalUserId"])
+    .index("by_user_story", ["externalUserId", "storyId"]),
   feed_projections: defineTable({
     externalUserId: v.string(),
     storyId: v.string(),

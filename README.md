@@ -14,6 +14,11 @@ Production-oriented multilingual news comparison platform scaffolded for:
 
 The repository intentionally stores and displays publisher metadata, links, and short snippets only. Raw crawl artifacts belong in R2, not Postgres.
 
+Frontend user interactions such as follows, hides, saved stories, feed
+projections, and notifications belong in Convex. Backend APIs use the
+Neon/Postgres side for canonical news data, crawl state, AI jobs, and
+compliance workflows.
+
 ## Quick Start
 
 ```sh

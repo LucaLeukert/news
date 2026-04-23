@@ -11,6 +11,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@news/types": "workspace:*",
     "effect": "4.0.0-beta.56"
   },
   "devDependencies": {

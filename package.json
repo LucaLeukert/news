@@ -7,7 +7,7 @@
     "dev": "turbo dev",
     "build": "turbo build",
     "test": "vitest run",
-    "typecheck": "turbo typecheck",
+    "typecheck": "turbo typecheck && tsc -p convex/tsconfig.json --noEmit",
     "lint": "oxlint . && biome check .",
     "format": "biome format --write .",
     "effect:lsp": "effect-language-service",

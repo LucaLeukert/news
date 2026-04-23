@@ -13,11 +13,8 @@ import {
   articleMetadataSchema,
   decodeUnknownSync,
   resolveUrlRequestSchema,
-  saveStoryRequestSchema,
   storyListQuerySchema,
   storySchema,
-  userFollowRequestSchema,
-  userHideRequestSchema,
 } from "@news/types";
 import { Data, DateTime, Effect, Layer, Option } from "effect";
 import * as Headers from "effect/unstable/http/Headers";
@@ -25,7 +22,6 @@ import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import { FixtureNewsRepositoryLive, NewsRepository } from "./repository";
-import { FixtureUserActionsLive, UserActions } from "./user-actions";
 
 export interface Env {
   DATABASE_URL?: string;
@@ -98,9 +94,6 @@ const decodeArticleMetadata = decodeUnknownSync(articleMetadataSchema);
 const decodeAiResultEnvelope = decodeUnknownSync(aiResultEnvelopeSchema);
 const decodeResolveUrlRequest = decodeUnknownSync(resolveUrlRequestSchema);
 const decodeStoryListQuery = decodeUnknownSync(storyListQuerySchema);
-const decodeUserFollowRequest = decodeUnknownSync(userFollowRequestSchema);
-const decodeUserHideRequest = decodeUnknownSync(userHideRequestSchema);
-const decodeSaveStoryRequest = decodeUnknownSync(saveStoryRequestSchema);
 
 function storyListQueryFromUrl(url: URL) {
   const query: {
@@ -333,15 +326,12 @@ function handleWriteApi(request: Request, path: string, env: Env) {
   return Effect.gen(function* () {
     const auth = yield* AuthService;
     const repository = yield* NewsRepository;
-    const userActions = yield* UserActions;
     const identity = yield* auth.getIdentityFromRequest(request).pipe(
       Effect.catchIf(
         () => true,
         () => Effect.succeed({ userId: null, orgId: null, sessionId: null }),
       ),
     );
-    const userId =
-      identity.userId ?? (env.CLERK_SECRET_KEY ? null : "local-dev-user");
 
     if (path === "/resolve-url" && request.method === "POST") {
       const body = yield* parseJson(request, decodeResolveUrlRequest);
@@ -367,37 +357,6 @@ function handleWriteApi(request: Request, path: string, env: Env) {
         storyId: null,
         queued: true,
       });
-    }
-
-    if (path === "/user/follow" && request.method === "POST") {
-      if (!userId) return json({ error: "unauthorized" }, { status: 401 });
-      const body = yield* parseJson(request, decodeUserFollowRequest);
-      const result = yield* userActions.follow(userId, body);
-      return json(result, { status: result.status === "created" ? 201 : 200 });
-    }
-
-    if (path === "/user/hide" && request.method === "POST") {
-      if (!userId) return json({ error: "unauthorized" }, { status: 401 });
-      const body = yield* parseJson(request, decodeUserHideRequest);
-      const result = yield* userActions.hide(userId, body);
-      return json(result, { status: result.status === "created" ? 201 : 200 });
-    }
-
-    if (path === "/user/save-story" && request.method === "POST") {
-      if (!userId) return json({ error: "unauthorized" }, { status: 401 });
-      const body = yield* parseJson(request, decodeSaveStoryRequest);
-      const detail = yield* repository.getStory(body.storyId);
-      if (!detail) return notFound();
-      const result = yield* userActions.saveStory(userId, body);
-      return json(result, { status: result.status === "created" ? 201 : 200 });
-    }
-
-    if (path.startsWith("/user/save-story/") && request.method === "DELETE") {
-      if (!userId) return json({ error: "unauthorized" }, { status: 401 });
-      const storyId = path.split("/").at(-1) ?? "";
-      const body = decodeSaveStoryRequest({ storyId });
-      const result = yield* userActions.deleteSavedStory(userId, body.storyId);
-      return json(result);
     }
 
     return null;
@@ -431,11 +390,7 @@ export default {
         return notFound();
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(
-            makeAppLayer(parsedEnv),
-            FixtureNewsRepositoryLive,
-            FixtureUserActionsLive,
-          ),
+          Layer.mergeAll(makeAppLayer(parsedEnv), FixtureNewsRepositoryLive),
         ),
       );
 
