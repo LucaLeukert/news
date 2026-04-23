@@ -1,0 +1,276 @@
+:root {
+  color-scheme: light;
+  --background: #f7f6f2;
+  --surface: #fffdf8;
+  --surface-2: #ece9df;
+  --text: #1d1b16;
+  --muted: #625d52;
+  --border: #d7d1c3;
+  --accent: #9b2f22;
+  --accent-2: #206a4b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--text);
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Avenir Next",
+    "Helvetica Neue", sans-serif;
+}
+
+a {
+  color: inherit;
+}
+
+.shell {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  border-bottom: 1px solid var(--border);
+  padding: 12px 0 18px;
+}
+
+.brand {
+  font-weight: 720;
+  text-decoration: none;
+}
+
+nav {
+  display: flex;
+  gap: 18px;
+  font-size: 14px;
+}
+
+nav a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.account-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.account-bar button,
+.billing-link {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 0 10px;
+  text-decoration: none;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 24px;
+  padding-top: 24px;
+}
+
+.search {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+input,
+button {
+  min-height: 42px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+}
+
+input {
+  width: 100%;
+  background: var(--surface);
+  padding: 0 12px;
+}
+
+button {
+  background: var(--text);
+  color: var(--surface);
+  padding: 0 16px;
+}
+
+.story-list,
+.story-detail {
+  display: grid;
+  gap: 14px;
+}
+
+.story-row,
+.side-panel,
+.summary-grid > div,
+#coverage,
+#headlines {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.story-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 18px;
+  padding: 18px;
+}
+
+.story-title {
+  display: inline-block;
+  font-size: 22px;
+  font-weight: 720;
+  line-height: 1.2;
+  text-decoration: none;
+}
+
+.story-row p,
+.side-panel p,
+.story-heading p,
+.summary-grid p {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.story-facts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 0;
+}
+
+.story-facts div {
+  border-left: 1px solid var(--border);
+  padding-left: 10px;
+}
+
+dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+dd {
+  margin: 4px 0 0;
+  font-weight: 720;
+}
+
+.side-panel {
+  padding: 18px;
+  align-self: start;
+}
+
+.side-panel h2,
+.summary-grid h2,
+#coverage h2,
+#headlines h2 {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+
+.side-panel li,
+.summary-grid li {
+  margin: 8px 0;
+  color: var(--muted);
+}
+
+.story-heading {
+  padding: 22px 0 8px;
+}
+
+h1 {
+  max-width: 980px;
+  margin: 0;
+  font-size: clamp(34px, 5vw, 64px);
+  letter-spacing: 0;
+  line-height: 1.02;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.summary-grid > div,
+#coverage,
+#headlines {
+  padding: 16px;
+}
+
+.distribution {
+  display: grid;
+  gap: 10px;
+}
+
+.bar-row {
+  display: grid;
+  grid-template-columns: 64px 1fr 44px;
+  align-items: center;
+  gap: 10px;
+}
+
+meter {
+  width: 100%;
+  height: 14px;
+}
+
+.article-table {
+  display: grid;
+}
+
+.article-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 70px 90px 140px;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+  text-decoration: none;
+}
+
+.article-row span:not(:first-child) {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: var(--background);
+}
+
+@media (max-width: 860px) {
+  .topbar,
+  .workspace,
+  .story-row,
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar,
+  nav {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .article-row {
+    grid-template-columns: 1fr;
+  }
+}

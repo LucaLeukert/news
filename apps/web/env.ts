@@ -1,0 +1,21 @@
+import { createEnv } from "@t3-oss/env-nextjs";
+import { z } from "zod";
+
+export const env = createEnv({
+  server: {
+    CLERK_SECRET_KEY: z.string().optional(),
+    CLERK_PRICE_ID_PRO: z.string().optional(),
+  },
+  client: {
+    NEXT_PUBLIC_API_BASE_URL: z.string().url().default("http://localhost:8787"),
+    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: z.string().optional(),
+  },
+  runtimeEnv: {
+    CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY,
+    CLERK_PRICE_ID_PRO: process.env.CLERK_PRICE_ID_PRO,
+    NEXT_PUBLIC_API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL,
+    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:
+      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
+  },
+  emptyStringAsUndefined: true,
+});

@@ -1,0 +1,20 @@
+{
+  "name": "@news/scheduler",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev src/index.ts --local --port 8788",
+    "build": "wrangler deploy --dry-run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@news/platform": "workspace:*",
+    "effect": "4.0.0-beta.56"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250418.0",
+    "typescript": "^5.8.3",
+    "wrangler": "^4.12.0"
+  }
+}

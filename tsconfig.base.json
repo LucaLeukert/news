@@ -1,0 +1,54 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        "diagnosticSeverity": {
+          "asyncFunction": "warning",
+          "instanceOfSchema": "warning",
+          "cryptoRandomUUID": "warning",
+          "cryptoRandomUUIDInEffect": "warning",
+          "newPromise": "warning",
+          "globalFetch": "warning",
+          "globalFetchInEffect": "warning",
+          "processEnv": "warning",
+          "processEnvInEffect": "warning",
+          "preferSchemaOverJson": "warning",
+          "extendsNativeError": "warning",
+          "nodeBuiltinImport": "warning",
+          "globalDate": "warning",
+          "globalDateInEffect": "warning",
+          "globalConsole": "warning",
+          "globalConsoleInEffect": "warning",
+          "globalRandom": "warning",
+          "globalRandomInEffect": "warning",
+          "globalTimers": "warning",
+          "globalTimersInEffect": "warning"
+        }
+      }
+    ],
+    "paths": {
+      "@news/types": ["./packages/types/src/index.ts"],
+      "@news/shared": ["./packages/shared/src/index.ts"],
+      "@news/platform": ["./packages/platform/src/index.ts"],
+      "@news/db": ["./packages/db/src/index.ts"],
+      "@news/ai": ["./packages/ai/src/index.ts"],
+      "@news/crawler-core": ["./packages/crawler-core/src/index.ts"],
+      "@news/observability": ["./packages/observability/src/index.ts"],
+      "@news/convex-sync": ["./packages/convex-sync/src/index.ts"]
+    }
+  },
+  "$schema": "https://raw.githubusercontent.com/Effect-TS/language-service/refs/heads/main/schema.json"
+}

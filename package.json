@@ -1,0 +1,39 @@
+{
+  "name": "coverage-lens",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.2.0",
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "test": "vitest run",
+    "typecheck": "turbo typecheck",
+    "lint": "oxlint . && biome check .",
+    "format": "biome format --write .",
+    "effect:lsp": "effect-language-service",
+    "db:generate": "bun --filter @news/db drizzle-kit generate",
+    "db:migrate": "bun --filter @news/db drizzle-kit migrate",
+    "api:dev": "bun --filter @news/api dev",
+    "ai:runner": "bun --filter @news/ai-runner dev"
+  },
+  "dependencies": {
+    "@ai-sdk/openai-compatible": "^2.0.41",
+    "@clerk/backend": "^3.2.13",
+    "@clerk/nextjs": "^7.2.3",
+    "@t3-oss/env-core": "^0.13.11",
+    "@t3-oss/env-nextjs": "^0.13.11",
+    "ai": "^6.0.168",
+    "convex": "^1.36.0",
+    "effect": "4.0.0-beta.56"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@effect/language-service": "^0.85.1",
+    "@types/node": "^22.14.1",
+    "oxlint": "^1.61.0",
+    "turbo": "^2.5.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.1"
+  },
+  "workspaces": ["apps/*", "services/*", "packages/*"]
+}

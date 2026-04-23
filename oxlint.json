@@ -1,0 +1,20 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "ignorePatterns": [
+    "node_modules/**",
+    ".turbo/**",
+    "**/.turbo/**",
+    ".next/**",
+    "**/.next/**",
+    "dist/**",
+    "**/.wrangler/**",
+    "bun.lock",
+    "apps/*/next-env.d.ts"
+  ],
+  "typescript": {
+    "allowNamespaces": false
+  },
+  "rules": {
+    "typescript-eslint/triple-slash-reference": "off"
+  }
+}

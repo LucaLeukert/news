@@ -1,0 +1,18 @@
+name = "coverage-lens-api"
+main = "src/index.ts"
+compatibility_date = "2026-04-22"
+
+[vars]
+ENVIRONMENT = "local"
+
+[[r2_buckets]]
+binding = "CRAWL_ARTIFACTS"
+bucket_name = "crawl-artifacts"
+
+[[queues.producers]]
+binding = "CRAWL_QUEUE"
+queue = "crawl-jobs"
+
+[[queues.producers]]
+binding = "AI_QUEUE"
+queue = "ai-jobs"
