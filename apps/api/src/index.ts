@@ -3,9 +3,9 @@ import {
   MetricsService,
   type NewsRpcError,
   NewsRpcs,
-  loadServerEnv,
   makeAppLayer,
 } from "@news/platform";
+import { loadServerEnv } from "@news/env";
 import {
   type AiResultEnvelope,
   type CrawlEnqueueRequest,
@@ -16,29 +16,43 @@ import {
   storyListQuerySchema,
   storySchema,
 } from "@news/types";
-import { Data, DateTime, Effect, Layer, Option } from "effect";
+import { Context, Data, DateTime, Effect, Layer, Option } from "effect";
 import * as Headers from "effect/unstable/http/Headers";
+import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
-import { FixtureNewsRepositoryLive, NewsRepository } from "./repository";
+import {
+  FixtureNewsRepositoryLive,
+  NewsRepository,
+  PostgresNewsRepositoryLive,
+  makeFixtureRepository,
+} from "./repository";
+import {
+  leaseAiJobFromCanonicalStore,
+  persistAiResultToCanonicalStore,
+  syncCanonicalStoriesToConvex,
+} from "./canonical";
 
 export interface Env {
   DATABASE_URL?: string;
   CRAWL_QUEUE?: Queue;
   AI_QUEUE?: Queue;
+  SYNC_QUEUE?: Queue;
   CRAWL_ARTIFACTS?: R2Bucket;
   CLERK_SECRET_KEY?: string;
   LOCAL_MODEL_BASE_URL?: string;
   LOCAL_MODEL_NAME?: string;
   INTERNAL_SERVICE_TOKEN?: string;
+  NEXT_PUBLIC_CONVEX_URL?: string;
 }
 
-function json(data: unknown, init: ResponseInit = {}) {
-  return new Response(JSON.stringify(data, null, 2), {
+type ResponseOptions = HttpServerResponse.Options.WithContentType;
+
+function json(data: unknown, init: ResponseOptions = {}) {
+  return HttpServerResponse.json(data, {
     ...init,
     headers: {
-      "content-type": "application/json; charset=utf-8",
       "cache-control":
         init.status && init.status >= 400 ? "no-store" : "public, max-age=60",
       ...init.headers,
@@ -64,14 +78,33 @@ type QueueMessage =
   | {
       readonly type: "ai_result";
       readonly result: AiResultEnvelope;
+    }
+  | {
+      readonly type: "sync_public_story_projections";
+      readonly reason: "ai_result";
+      readonly jobId: string;
+      readonly queuedAt: string;
     };
 
-const parseJson = <A>(request: Request, parse: (value: unknown) => A) =>
-  Effect.tryPromise({
-    try: () => request.json(),
-    catch: (cause) =>
-      new ApiRequestError({ message: "Request JSON parsing failed", cause }),
-  }).pipe(Effect.map(parse));
+type WorkerQueueMessage = Extract<QueueMessage, { readonly type: string }>;
+
+const parseJson = <A>(
+  request: HttpServerRequest.HttpServerRequest,
+  parse: (value: unknown) => A,
+) =>
+  HttpServerRequest.toWeb(request).pipe(
+    Effect.flatMap((webRequest) =>
+      Effect.tryPromise({
+        try: () => webRequest.json(),
+        catch: (cause) =>
+          new ApiRequestError({
+            message: "Request JSON parsing failed",
+            cause,
+          }),
+      }),
+    ),
+    Effect.map(parse),
+  );
 
 function requireRpcInternalAuth(headers: Headers.Headers, env: Env) {
   const serviceToken = Headers.get(headers, "x-service-token");
@@ -134,6 +167,35 @@ const isoAfter = (duration: Parameters<typeof DateTime.addDuration>[1]) =>
   DateTime.now.pipe(
     Effect.map((now) => DateTime.addDuration(now, duration)),
     Effect.map(DateTime.formatIso),
+  );
+
+const getIdentity = (request: HttpServerRequest.HttpServerRequest) =>
+  Effect.gen(function* () {
+    const auth = yield* AuthService;
+    const webRequest = yield* HttpServerRequest.toWeb(request);
+    return yield* auth.getIdentityFromRequest(webRequest).pipe(
+      Effect.catchIf(
+        () => true,
+        () => Effect.succeed({ userId: null, orgId: null, sessionId: null }),
+      ),
+    );
+  });
+
+const withBadRequestFallback = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A | HttpServerResponse.HttpServerResponse, never, R> =>
+  effect.pipe(
+    Effect.catchIf(
+      () => true,
+      (error: unknown) =>
+        json(
+          {
+            error: "bad_request",
+            message: error instanceof Error ? error.message : "Unknown error",
+          },
+          { status: 400 },
+        ).pipe(Effect.orDie),
+    ),
   );
 
 const makeRpcHandlersLayer = (env: Env) =>
@@ -201,27 +263,11 @@ const makeRpcHandlersLayer = (env: Env) =>
                 unauthorizedRpcError("Unauthorized RPC AI lease"),
               );
             }
-            const stories = yield* repository.listStories({});
-            const story = stories[0];
-            if (!story) return null;
-            const detail = yield* repository.getStory(story.id);
-            return {
-              id: "00000000-0000-4000-8000-000000000301",
-              type: "neutral_story_summary" as const,
-              payload: {
-                storyTitle: story.title,
-                articles: (detail?.articles ?? []).map((article) => ({
-                  id: article.id,
-                  title: article.title,
-                  snippet: article.snippet,
-                  source: article.publisher,
-                })),
-              },
-              inputArtifactIds: (detail?.articles ?? []).map(
-                (article) => article.id,
-              ),
-              leaseExpiresAt: yield* isoAfter("60 seconds"),
-            };
+            if (!env.DATABASE_URL) return null;
+            return yield* leaseAiJobFromCanonicalStore(
+              env.DATABASE_URL,
+              _payload.nodeId,
+            ).pipe(Effect.mapError(toRpcError));
           }).pipe(Effect.mapError(toRpcError)),
         SubmitAiJobResult: ({ result }, options) =>
           Effect.gen(function* () {
@@ -238,130 +284,114 @@ const makeRpcHandlersLayer = (env: Env) =>
     }),
   );
 
-function handleRpcApi(request: Request, path: string, env: Env) {
-  return Effect.gen(function* () {
-    if (path !== "/rpc") return null;
-    const rpcResponse = yield* RpcServer.toHttpEffect(NewsRpcs).pipe(
-      Effect.flatten,
-      Effect.provideService(
-        HttpServerRequest.HttpServerRequest,
-        HttpServerRequest.fromWeb(request),
+const makeHttpRoutesLayer = (env: Env) =>
+  Layer.mergeAll(
+    HttpRouter.add("GET", "/stories", (request) =>
+      withBadRequestFallback(
+        Effect.gen(function* () {
+          const metrics = yield* MetricsService;
+          const repository = yield* NewsRepository;
+          const identity = yield* getIdentity(request);
+          const webRequest = yield* HttpServerRequest.toWeb(request);
+          const stories = yield* repository.listStories(
+            storyListQueryFromUrl(new URL(webRequest.url)),
+          );
+          yield* metrics.increment("queue.depth", { surface: "stories" });
+          return yield* json({
+            stories: stories.map((story) => decodeStory(story)),
+            viewer: identity.userId,
+            source: env.DATABASE_URL ? "postgres" : "fixture",
+          });
+        }),
       ),
-      Effect.scoped,
-      Effect.provide(
-        Layer.merge(makeRpcHandlersLayer(env), RpcSerialization.layerNdjson),
+    ),
+    HttpRouter.add("GET", "/stories/:id", () =>
+      withBadRequestFallback(
+        Effect.gen(function* () {
+          const repository = yield* NewsRepository;
+          const { id = "" } = yield* HttpRouter.params;
+          const detail = yield* repository.getStory(id);
+          if (!detail) return yield* notFound();
+          return yield* json({
+            story: decodeStory(detail.story),
+            articles: detail.articles.map((article) =>
+              decodeArticleMetadata(article),
+            ),
+          });
+        }),
       ),
-    );
-    return HttpServerResponse.toWeb(rpcResponse);
-  });
-}
-
-function handleReadApi(request: Request, path: string, env: Env) {
-  return Effect.gen(function* () {
-    const metrics = yield* MetricsService;
-    const auth = yield* AuthService;
-    const repository = yield* NewsRepository;
-    const identity = yield* auth.getIdentityFromRequest(request).pipe(
-      Effect.catchIf(
-        () => true,
-        () => Effect.succeed({ userId: null, orgId: null, sessionId: null }),
+    ),
+    HttpRouter.add("GET", "/articles/:id", () =>
+      withBadRequestFallback(
+        Effect.gen(function* () {
+          const repository = yield* NewsRepository;
+          const { id = "" } = yield* HttpRouter.params;
+          const article = yield* repository.getArticle(id);
+          return article
+            ? yield* json({ article: decodeArticleMetadata(article) })
+            : yield* notFound();
+        }),
       ),
-    );
-
-    if (path === "/stories" && request.method === "GET") {
-      const url = new URL(request.url);
-      const query = storyListQueryFromUrl(url);
-      const stories = yield* repository.listStories(query);
-      yield* metrics.increment("queue.depth", { surface: "stories" });
-      return json({
-        stories: stories.map((story) => decodeStory(story)),
-        viewer: identity.userId,
-        source: env.DATABASE_URL ? "postgres" : "fixture",
-      });
-    }
-
-    if (path.startsWith("/stories/") && request.method === "GET") {
-      const id = path.split("/").at(-1) ?? "";
-      const detail = yield* repository.getStory(id);
-      if (!detail) return notFound();
-      return json({
-        story: decodeStory(detail.story),
-        articles: detail.articles.map((article) =>
-          decodeArticleMetadata(article),
-        ),
-      });
-    }
-
-    if (path.startsWith("/articles/") && request.method === "GET") {
-      const id = path.split("/").at(-1) ?? "";
-      const article = yield* repository.getArticle(id);
-      return article
-        ? json({ article: decodeArticleMetadata(article) })
-        : notFound();
-    }
-
-    if (path.startsWith("/sources/") && request.method === "GET") {
-      const id = path.split("/").at(-1) ?? "";
-      const source = yield* repository.getSource(id);
-      return source ? json({ source }) : notFound();
-    }
-
-    if (path === "/search" && request.method === "GET") {
-      const query = new URL(request.url).searchParams.get("q") ?? "";
-      const results = yield* repository.search(query);
-      return json({
-        query,
-        stories: results.stories.map((story) => decodeStory(story)),
-        articles: results.articles.map((article) =>
-          decodeArticleMetadata(article),
-        ),
-      });
-    }
-
-    return null;
-  });
-}
-
-function handleWriteApi(request: Request, path: string, env: Env) {
-  return Effect.gen(function* () {
-    const auth = yield* AuthService;
-    const repository = yield* NewsRepository;
-    const identity = yield* auth.getIdentityFromRequest(request).pipe(
-      Effect.catchIf(
-        () => true,
-        () => Effect.succeed({ userId: null, orgId: null, sessionId: null }),
+    ),
+    HttpRouter.add("GET", "/sources/:id", () =>
+      withBadRequestFallback(
+        Effect.gen(function* () {
+          const repository = yield* NewsRepository;
+          const { id = "" } = yield* HttpRouter.params;
+          const source = yield* repository.getSource(id);
+          return source ? yield* json({ source }) : yield* notFound();
+        }),
       ),
-    );
-
-    if (path === "/resolve-url" && request.method === "POST") {
-      const body = yield* parseJson(request, decodeResolveUrlRequest);
-      const resolved = yield* repository.resolveUrl(body.url);
-      if (resolved.storyId) {
-        return json({
-          status: "matched",
-          url: body.url,
-          storyId: resolved.storyId,
-          articleId: resolved.articleId,
-          queued: false,
-        });
-      }
-      yield* enqueue(env.CRAWL_QUEUE, {
-        type: "resolve_url",
-        url: body.url,
-        requestedBy: identity.userId,
-        queuedAt: yield* nowIso,
-      });
-      return json({
-        status: "queued_or_matched",
-        url: body.url,
-        storyId: null,
-        queued: true,
-      });
-    }
-
-    return null;
-  });
-}
+    ),
+    HttpRouter.add("GET", "/search", (request) =>
+      withBadRequestFallback(
+        Effect.gen(function* () {
+          const repository = yield* NewsRepository;
+          const webRequest = yield* HttpServerRequest.toWeb(request);
+          const query = new URL(webRequest.url).searchParams.get("q") ?? "";
+          const results = yield* repository.search(query);
+          return yield* json({
+            query,
+            stories: results.stories.map((story) => decodeStory(story)),
+            articles: results.articles.map((article) =>
+              decodeArticleMetadata(article),
+            ),
+          });
+        }),
+      ),
+    ),
+    HttpRouter.add("POST", "/resolve-url", (request) =>
+      withBadRequestFallback(
+        Effect.gen(function* () {
+          const repository = yield* NewsRepository;
+          const identity = yield* getIdentity(request);
+          const body = yield* parseJson(request, decodeResolveUrlRequest);
+          const resolved = yield* repository.resolveUrl(body.url);
+          if (resolved.storyId) {
+            return yield* json({
+              status: "matched",
+              url: body.url,
+              storyId: resolved.storyId,
+              articleId: resolved.articleId,
+              queued: false,
+            });
+          }
+          yield* enqueue(env.CRAWL_QUEUE, {
+            type: "resolve_url",
+            url: body.url,
+            requestedBy: identity.userId,
+            queuedAt: yield* nowIso,
+          });
+          return yield* json({
+            status: "queued_or_matched",
+            url: body.url,
+            storyId: null,
+            queued: true,
+          });
+        }),
+      ),
+    ),
+  );
 
 function runtimeEnv(env: Env) {
   return {
@@ -369,49 +399,134 @@ function runtimeEnv(env: Env) {
     CLERK_SECRET_KEY: env.CLERK_SECRET_KEY,
     LOCAL_MODEL_BASE_URL: env.LOCAL_MODEL_BASE_URL,
     LOCAL_MODEL_NAME: env.LOCAL_MODEL_NAME,
+    NEXT_PUBLIC_CONVEX_URL: env.NEXT_PUBLIC_CONVEX_URL,
+    INTERNAL_SERVICE_TOKEN: env.INTERNAL_SERVICE_TOKEN,
   };
 }
 
-export default {
-  fetch(request: Request, env: Env) {
-    const program = Effect.gen(function* () {
+type CachedHandler = (
+  request: Request,
+  context: Context.Context<unknown>,
+) => Promise<Response>;
+
+const handlerCache = new WeakMap<Env, Promise<CachedHandler>>();
+const requestContext = Context.add(
+  Context.empty(),
+  NewsRepository,
+  makeFixtureRepository(),
+) as Context.Context<unknown>;
+
+const getHandler = (env: Env) => {
+  const cached = handlerCache.get(env);
+  if (cached) return cached;
+
+  const next = Effect.runPromise(
+    Effect.gen(function* () {
       const parsedEnv = yield* loadServerEnv(runtimeEnv(env));
-      const url = new URL(request.url);
-      const handler = Effect.gen(function* () {
-        const rpc = yield* handleRpcApi(request, url.pathname, env);
-        if (rpc) return rpc;
-
-        const read = yield* handleReadApi(request, url.pathname, env);
-        if (read) return read;
-
-        const write = yield* handleWriteApi(request, url.pathname, env);
-        if (write) return write;
-
-        return notFound();
+      const repositoryLayer = env.DATABASE_URL
+        ? PostgresNewsRepositoryLive(env.DATABASE_URL)
+        : FixtureNewsRepositoryLive;
+      const httpRoutesLayer = makeHttpRoutesLayer(env).pipe(
+        Layer.provide(repositoryLayer),
+      );
+      const rpcLayer = RpcServer.layerHttp({
+        group: NewsRpcs,
+        path: "/rpc",
+        protocol: "http",
       }).pipe(
-        Effect.provide(
-          Layer.mergeAll(makeAppLayer(parsedEnv), FixtureNewsRepositoryLive),
-        ),
+        Layer.provide(makeRpcHandlersLayer(env).pipe(Layer.provide(repositoryLayer))),
+        Layer.provide(RpcSerialization.layerNdjson),
+      );
+      const appLayer = Layer.mergeAll(httpRoutesLayer, rpcLayer).pipe(
+        Layer.provideMerge(makeAppLayer(parsedEnv)),
       );
 
-      return yield* handler;
-    }).pipe(
-      Effect.catchIf(
-        () => true,
-        (error: unknown) =>
-          Effect.succeed(
-            json(
-              {
-                error: "bad_request",
-                message:
-                  error instanceof Error ? error.message : "Unknown error",
-              },
-              { status: 400 },
-            ),
-          ),
-      ),
-    );
+      return HttpRouter.toWebHandler(appLayer, {
+        routerConfig: { ignoreTrailingSlash: true },
+      }).handler;
+    }),
+  );
 
-    return Effect.runPromise(program);
+  handlerCache.set(env, next);
+  return next;
+};
+
+const toErrorResponse = (error: unknown) =>
+  new Response(
+    JSON.stringify(
+      {
+        error: "bad_request",
+        message: error instanceof Error ? error.message : "Unknown error",
+      },
+      null,
+      2,
+    ),
+    {
+      status: 400,
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store",
+      },
+    },
+  );
+
+export default {
+  fetch(request: Request, env: Env) {
+    return getHandler(env)
+      .then((handler) => handler(request, requestContext))
+      .catch(toErrorResponse);
+  },
+  queue(batch: MessageBatch<WorkerQueueMessage>, env: Env) {
+    const parsedEnv = runtimeEnv(env);
+    return Effect.runPromise(
+      Effect.forEach(batch.messages, (message) => {
+        const body = message.body;
+
+        if (body.type === "ai_result") {
+          if (!env.DATABASE_URL) {
+            return Effect.fail(
+              new ApiRequestError({
+                message: "DATABASE_URL is required for AI result handling",
+              }),
+            );
+          }
+
+          return Effect.gen(function* () {
+            yield* persistAiResultToCanonicalStore(env.DATABASE_URL as string, body.result);
+            const queuedAt = yield* nowIso;
+            yield* enqueue(env.SYNC_QUEUE, {
+              type: "sync_public_story_projections",
+              reason: "ai_result",
+              jobId: body.result.job_id,
+              queuedAt,
+            });
+          });
+        }
+
+        if (body.type === "sync_public_story_projections") {
+          return Effect.gen(function* () {
+            const loadedEnv = yield* loadServerEnv(parsedEnv);
+            if (!loadedEnv.DATABASE_URL) {
+              return yield* new ApiRequestError({
+                message: "DATABASE_URL is required for Convex sync",
+              });
+            }
+            if (!loadedEnv.NEXT_PUBLIC_CONVEX_URL) {
+              return yield* new ApiRequestError({
+                message: "NEXT_PUBLIC_CONVEX_URL is required for Convex sync",
+              });
+            }
+
+            yield* syncCanonicalStoriesToConvex({
+              databaseUrl: loadedEnv.DATABASE_URL,
+              convexUrl: loadedEnv.NEXT_PUBLIC_CONVEX_URL,
+              serviceToken: loadedEnv.INTERNAL_SERVICE_TOKEN,
+            });
+          });
+        }
+
+        return Effect.void;
+      }),
+    );
   },
 };

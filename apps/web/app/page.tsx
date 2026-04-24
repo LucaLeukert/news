@@ -1,26 +1,13 @@
-import { NewsRpcClient, NewsRpcClientLive } from "@news/platform";
-import { Effect } from "effect";
+import { api } from "@news/convex";
+import { fetchQuery } from "convex/nextjs";
 import Link from "next/link";
 import { env } from "../env";
 import { AccountBar } from "./account-bar";
 
 export const dynamic = "force-dynamic";
 
-const apiBase = env.NEXT_PUBLIC_API_BASE_URL;
-
-const getStories = Effect.gen(function* () {
-  const rpc = yield* NewsRpcClient;
-  return yield* rpc.listStories({});
-}).pipe(
-  Effect.catchIf(
-    () => true,
-    () => Effect.succeed([]),
-  ),
-  Effect.provide(NewsRpcClientLive({ apiBaseUrl: apiBase })),
-);
-
 export default async function Home() {
-  const stories = await Effect.runPromise(getStories);
+  const stories = await fetchQuery(api.storyProjections.listStories, {});
 
   return (
     <main className="shell">
@@ -49,42 +36,56 @@ export default async function Home() {
           </form>
 
           <div className="story-list">
-            {stories.map((story) => (
-              <article className="story-row" key={story.id}>
+            {stories.length > 0 ? (
+              stories.map((story) => (
+                <article className="story-row" key={story.id}>
+                  <div>
+                    <Link href={`/stories/${story.id}`} className="story-title">
+                      {story.title}
+                    </Link>
+                    <p>
+                      {story.summary?.neutralSummary ??
+                        "Summary pending model review."}
+                    </p>
+                  </div>
+                  <dl className="story-facts">
+                    <div>
+                      <dt>Sources</dt>
+                      <dd>
+                        {Object.values(story.coverage.byCountry).reduce(
+                          (sum, count) => sum + count,
+                          0,
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Languages</dt>
+                      <dd>{Object.keys(story.coverage.byLanguage).length}</dd>
+                    </div>
+                    <div>
+                      <dt>Confidence</dt>
+                      <dd>
+                        {story.summary
+                          ? `${Math.round(story.summary.confidence * 100)}%`
+                          : "Held"}
+                      </dd>
+                    </div>
+                  </dl>
+                </article>
+              ))
+            ) : (
+              <article className="story-row">
                 <div>
-                  <Link href={`/stories/${story.id}`} className="story-title">
-                    {story.title}
-                  </Link>
+                  <p className="story-title">No stories available</p>
                   <p>
-                    {story.summary?.neutralSummary ??
-                      "Summary pending model review."}
+                    Public reads now come from Convex projections. If this
+                    stays empty outside the built-in demo fallback, check that
+                    Convex sync is running and `NEXT_PUBLIC_CONVEX_URL` is
+                    configured.
                   </p>
                 </div>
-                <dl className="story-facts">
-                  <div>
-                    <dt>Sources</dt>
-                    <dd>
-                      {Object.values(story.coverage.byCountry).reduce(
-                        (sum, count) => sum + count,
-                        0,
-                      )}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Languages</dt>
-                    <dd>{Object.keys(story.coverage.byLanguage).length}</dd>
-                  </div>
-                  <div>
-                    <dt>Confidence</dt>
-                    <dd>
-                      {story.summary
-                        ? `${Math.round(story.summary.confidence * 100)}%`
-                        : "Held"}
-                    </dd>
-                  </div>
-                </dl>
               </article>
-            ))}
+            )}
           </div>
         </div>
 

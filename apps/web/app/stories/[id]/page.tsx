@@ -1,22 +1,14 @@
-import { NewsRpcClient, NewsRpcClientLive } from "@news/platform";
-import { Effect } from "effect";
+import { api } from "@news/convex";
+import { fetchQuery } from "convex/nextjs";
 import { notFound } from "next/navigation";
-import { env } from "../../../env";
 
 export const dynamic = "force-dynamic";
-
-const apiBase = env.NEXT_PUBLIC_API_BASE_URL;
 
 export default async function StoryPage({
   params,
 }: Readonly<{ params: Promise<{ id: string }> }>) {
   const { id } = await params;
-  const data = await Effect.runPromise(
-    Effect.gen(function* () {
-      const rpc = yield* NewsRpcClient;
-      return yield* rpc.getStory(id);
-    }).pipe(Effect.provide(NewsRpcClientLive({ apiBaseUrl: apiBase }))),
-  );
+  const data = await fetchQuery(api.storyProjections.getStory, { id });
   if (!data) notFound();
 
   const story = data.story;

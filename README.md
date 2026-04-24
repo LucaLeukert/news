@@ -25,11 +25,15 @@ compliance workflows.
 bun install
 bun test
 bun typecheck
-bun --filter @news/api dev
-bun --filter @news/web dev
+bun run dev
 ```
 
 Use `docker compose up -d postgres model-mock` for local infrastructure.
+
+`bun run dev` is the local app/dev entrypoint. It starts `@news/api`,
+`@news/web`, and `@news/admin` only, and does not require the local AI runner
+or a configured AI model. Use `bun run dev:all` only when you explicitly want
+the full workspace dev graph, including service packages.
 
 ## Workspace
 
@@ -39,7 +43,8 @@ Use `docker compose up -d postgres model-mock` for local infrastructure.
 - `services/*`: crawler, parser, clusterer, scheduler, and local AI runner.
 - `packages/shared`: shared Effect Schema contracts, constants, taxonomy helpers, and URL normalization.
 - `packages/types`: canonical shared domain types, Effect Schema contracts, and value helpers.
-- `packages/platform`: Effect runtime services for env, HTTP, metrics, auth, billing, AI, and logging.
+- `packages/platform`: Effect runtime services for HTTP, metrics, auth, billing, AI, and logging.
+- `packages/env`: shared T3 Env schemas and typed env loaders for Next, workers, services, Convex, and DB tooling.
 - `packages/db`: Drizzle schema and SQL migrations.
 - `packages/ai`: prompt versions, structured output schemas, model adapter.
 - `packages/crawler-core`: compliant crawling primitives.
@@ -56,8 +61,8 @@ Use `docker compose up -d postgres model-mock` for local infrastructure.
 
 Application code should return `Effect.Effect` at service boundaries. Use
 `@news/platform` tags and layers for HTTP, metrics, AI, Clerk auth, billing, and
-runtime configuration. Package env validation should use T3 Env directly or
-through `loadServerEnv`.
+runtime configuration. Environment validation should come from `@news/env`, with
+root `.env` as the single local source of truth.
 
 Effect devtools are wired through the TypeScript language-service plugin in
 `tsconfig.base.json`; run `bun effect:lsp` when configuring editor integration.

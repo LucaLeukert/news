@@ -30,12 +30,14 @@
       "version": "0.0.0",
       "dependencies": {
         "@clerk/nextjs": "^7.2.3",
-        "@t3-oss/env-nextjs": "^0.13.11",
+        "@news/convex": "workspace:*",
+        "@news/env": "workspace:*",
+        "@news/platform": "workspace:*",
+        "convex": "^1.36.0",
         "effect": "4.0.0-beta.56",
         "next": "^15.3.1",
         "react": "^19.1.0",
         "react-dom": "^19.1.0",
-        "zod": "^3.24.3",
       },
       "devDependencies": {
         "@types/node": "^22.14.1",
@@ -49,9 +51,14 @@
       "name": "@news/api",
       "version": "0.0.0",
       "dependencies": {
+        "@news/convex": "workspace:*",
+        "@news/db": "workspace:*",
+        "@news/env": "workspace:*",
         "@news/platform": "workspace:*",
         "@news/shared": "workspace:*",
         "@news/types": "workspace:*",
+        "convex": "^1.36.0",
+        "drizzle-orm": "^0.43.1",
         "effect": "4.0.0-beta.56",
         "zod": "^3.24.3",
       },
@@ -67,15 +74,15 @@
       "version": "0.0.0",
       "dependencies": {
         "@clerk/nextjs": "^7.2.3",
-        "@news/platform": "workspace:*",
+        "@news/convex": "workspace:*",
+        "@news/env": "workspace:*",
         "@news/shared": "workspace:*",
         "@news/types": "workspace:*",
-        "@t3-oss/env-nextjs": "^0.13.11",
+        "convex": "^1.36.0",
         "effect": "4.0.0-beta.56",
         "next": "^15.3.1",
         "react": "^19.1.0",
         "react-dom": "^19.1.0",
-        "zod": "^3.24.3",
       },
       "devDependencies": {
         "@types/node": "^22.14.1",
@@ -100,12 +107,15 @@
         "vitest": "^3.1.1",
       },
     },
-    "packages/config": {
-      "name": "@news/config",
+    "packages/convex": {
+      "name": "@news/convex",
       "version": "0.0.0",
       "dependencies": {
-        "@t3-oss/env-core": "^0.13.11",
-        "zod": "^3.24.3",
+        "@news/env": "workspace:*",
+        "@news/platform": "workspace:*",
+        "@news/shared": "workspace:*",
+        "convex": "^1.36.0",
+        "effect": "4.0.0-beta.56",
       },
       "devDependencies": {
         "typescript": "5.8.3",
@@ -140,15 +150,28 @@
       "name": "@news/db",
       "version": "0.0.0",
       "dependencies": {
-        "@t3-oss/env-core": "^0.13.11",
+        "@neondatabase/serverless": "^1.0.1",
+        "@news/env": "workspace:*",
         "drizzle-orm": "^0.43.1",
         "postgres": "^3.4.5",
-        "zod": "^3.24.3",
       },
       "devDependencies": {
         "drizzle-kit": "^0.31.0",
         "typescript": "5.8.3",
         "vitest": "^3.1.1",
+      },
+    },
+    "packages/env": {
+      "name": "@news/env",
+      "version": "0.0.0",
+      "dependencies": {
+        "@t3-oss/env-core": "^0.13.11",
+        "@t3-oss/env-nextjs": "^0.13.11",
+        "effect": "4.0.0-beta.56",
+        "zod": "^3.24.3",
+      },
+      "devDependencies": {
+        "typescript": "5.8.3",
       },
     },
     "packages/observability": {
@@ -168,8 +191,8 @@
       "dependencies": {
         "@ai-sdk/openai-compatible": "^2.0.41",
         "@clerk/backend": "^3.2.13",
+        "@news/env": "workspace:*",
         "@news/types": "workspace:*",
-        "@t3-oss/env-core": "^0.13.11",
         "ai": "^6.0.168",
         "effect": "4.0.0-beta.56",
         "zod": "^3.24.3",
@@ -206,6 +229,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@news/ai": "workspace:*",
+        "@news/env": "workspace:*",
         "@news/platform": "workspace:*",
         "@news/shared": "workspace:*",
         "@news/types": "workspace:*",
@@ -233,6 +257,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@news/crawler-core": "workspace:*",
+        "@news/env": "workspace:*",
         "@news/platform": "workspace:*",
         "@news/shared": "workspace:*",
       },
@@ -255,6 +280,7 @@
       "name": "@news/scheduler",
       "version": "0.0.0",
       "dependencies": {
+        "@news/env": "workspace:*",
         "@news/platform": "workspace:*",
         "effect": "4.0.0-beta.56",
       },
@@ -448,6 +474,8 @@
 
     "@msgpackr-extract/msgpackr-extract-win32-x64": ["@msgpackr-extract/msgpackr-extract-win32-x64@3.0.3", "", { "os": "win32", "cpu": "x64" }, "sha512-x0fWaQtYp4E6sktbsdAqnehxDgEc/VwM7uLsRCYWaiGu0ykYdZPiS8zCWdnjHwyiumousxfBm4SO31eXqwEZhQ=="],
 
+    "@neondatabase/serverless": ["@neondatabase/serverless@1.1.0", "", {}, "sha512-r3ZZhRjEcfEdKIZnoB1RusNgvHuaBRqfCzV4Gi+5A9yUX0S4HTws/ASWqt13wL4y4I+0rqsWGdA2w7EQXHi3+Q=="],
+
     "@news/admin": ["@news/admin@workspace:apps/admin"],
 
     "@news/ai": ["@news/ai@workspace:packages/ai"],
@@ -458,7 +486,7 @@
 
     "@news/clusterer": ["@news/clusterer@workspace:services/clusterer"],
 
-    "@news/config": ["@news/config@workspace:packages/config"],
+    "@news/convex": ["@news/convex@workspace:packages/convex"],
 
     "@news/convex-sync": ["@news/convex-sync@workspace:packages/convex-sync"],
 
@@ -467,6 +495,8 @@
     "@news/crawler-core": ["@news/crawler-core@workspace:packages/crawler-core"],
 
     "@news/db": ["@news/db@workspace:packages/db"],
+
+    "@news/env": ["@news/env@workspace:packages/env"],
 
     "@news/observability": ["@news/observability@workspace:packages/observability"],
 

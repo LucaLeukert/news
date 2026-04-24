@@ -14,8 +14,8 @@
   "dependencies": {
     "@ai-sdk/openai-compatible": "^2.0.41",
     "@clerk/backend": "^3.2.13",
+    "@news/env": "workspace:*",
     "@news/types": "workspace:*",
-    "@t3-oss/env-core": "^0.13.11",
     "ai": "^6.0.168",
     "effect": "4.0.0-beta.56",
     "zod": "^3.24.3"

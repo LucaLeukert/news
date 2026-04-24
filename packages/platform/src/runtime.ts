@@ -1,7 +1,7 @@
+import type { ServerEnv } from "@news/env";
 import { Effect, Layer, Logger } from "effect";
 import { AiGatewayLive } from "./ai-gateway";
 import { AuthLive, BillingLive } from "./auth";
-import type { ServerEnv } from "./env";
 import { HttpLive } from "./http";
 import { MetricsLive } from "./metrics";
 

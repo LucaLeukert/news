@@ -4,11 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev src/index.ts --local --port 8788",
-    "build": "wrangler deploy --dry-run",
+    "dev": "bun --env-file ../../.env wrangler dev src/index.ts --local --port 8788",
+    "build": "bun --env-file ../../.env wrangler deploy --dry-run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@news/env": "workspace:*",
     "@news/platform": "workspace:*",
     "effect": "4.0.0-beta.56"
   },

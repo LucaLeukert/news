@@ -7,10 +7,10 @@ import {
 import {
   HttpService,
   MetricsService,
-  loadServerEnv,
   makeAppLayer,
   runMain,
 } from "@news/platform";
+import { loadServerEnv } from "@news/env";
 import { USER_AGENT } from "@news/types";
 import { Effect } from "effect";
 

@@ -1,3 +1,4 @@
+import { type ServerEnv, loadServerEnv } from "@news/env";
 import {
   StructuredAiLive,
   aiSchemasByJobType,
@@ -10,8 +11,6 @@ import {
   MetricsService,
   NewsRpcClient,
   NewsRpcClientLive,
-  type ServerEnv,
-  loadServerEnv,
   makeAppLayer,
   runMain,
 } from "@news/platform";

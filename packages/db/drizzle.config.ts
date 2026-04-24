@@ -1,20 +1,10 @@
-import { createEnv } from "@t3-oss/env-core";
+import { makeDrizzleEnv } from "@news/env";
 import { defineConfig } from "drizzle-kit";
-import { z } from "zod";
 
-const runtimeEnv = globalThis.process.env;
+const runtimeEnv = typeof process !== "undefined" ? process.env : {};
 
-const env = createEnv({
-  server: {
-    DATABASE_URL: z
-      .string()
-      .url()
-      .default("postgres://postgres:postgres@localhost:5432/news"),
-  },
-  runtimeEnv: {
-    DATABASE_URL: runtimeEnv.DATABASE_URL,
-  },
-  emptyStringAsUndefined: true,
+const env = makeDrizzleEnv({
+  DATABASE_URL: runtimeEnv.DATABASE_URL,
 });
 
 export default defineConfig({

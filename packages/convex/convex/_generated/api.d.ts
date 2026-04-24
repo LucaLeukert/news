@@ -8,6 +8,9 @@
  * @module
  */
 
+import type * as crons from "../crons.js";
+import type * as storyProjectionSync from "../storyProjectionSync.js";
+import type * as storyProjections from "../storyProjections.js";
 import type * as userActions from "../userActions.js";
 
 import type {
@@ -17,6 +20,9 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  crons: typeof crons;
+  storyProjectionSync: typeof storyProjectionSync;
+  storyProjections: typeof storyProjections;
   userActions: typeof userActions;
 }>;
 

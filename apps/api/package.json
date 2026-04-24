@@ -4,15 +4,20 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev src/index.ts --local --port 8787",
-    "build": "wrangler deploy --dry-run",
+    "dev": "bun --env-file ../../.env wrangler dev src/index.ts --local --port 8787",
+    "build": "bun --env-file ../../.env wrangler deploy --dry-run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
+    "@news/convex": "workspace:*",
+    "@news/db": "workspace:*",
+    "@news/env": "workspace:*",
     "@news/platform": "workspace:*",
     "@news/shared": "workspace:*",
     "@news/types": "workspace:*",
+    "convex": "^1.36.0",
+    "drizzle-orm": "^0.43.1",
     "effect": "4.0.0-beta.56",
     "zod": "^3.24.3"
   },

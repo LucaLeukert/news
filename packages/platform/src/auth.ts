@@ -1,6 +1,6 @@
 import { createClerkClient } from "@clerk/backend";
+import type { ServerEnv } from "@news/env";
 import { Context, Effect, Layer } from "effect";
-import type { ServerEnv } from "./env";
 import { AuthError, type BillingError } from "./errors";
 
 export type AuthIdentity = {

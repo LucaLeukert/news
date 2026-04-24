@@ -1,6 +1,7 @@
 # Effect Runtime
 
-The production runtime is centered on `packages/platform`.
+The production runtime is centered on `packages/platform`, with shared env
+validation in `packages/env`.
 
 ## Services
 
@@ -26,7 +27,8 @@ Fallbacks are explicit with `Effect.catchAll` or tag-specific handlers.
 
 T3 Env is used for:
 
-- Next app env files in `apps/web/env.ts` and `apps/admin/env.ts`.
+- Shared schemas and loaders in `@news/env`.
+- Thin app re-exports in `apps/web/env.ts` and `apps/admin/env.ts`.
 - Worker/service env through `loadServerEnv`.
 - Database config through `packages/db`.
 

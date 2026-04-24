@@ -16,3 +16,13 @@ queue = "crawl-jobs"
 [[queues.producers]]
 binding = "AI_QUEUE"
 queue = "ai-jobs"
+
+[[queues.producers]]
+binding = "SYNC_QUEUE"
+queue = "convex-sync"
+
+[[queues.consumers]]
+queue = "ai-jobs"
+
+[[queues.consumers]]
+queue = "convex-sync"

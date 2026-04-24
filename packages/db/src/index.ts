@@ -1,28 +1,16 @@
-import { createEnv } from "@t3-oss/env-core";
-import { drizzle } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
-import { z } from "zod";
+import { makeDbEnv } from "@news/env";
+import { neon } from "@neondatabase/serverless";
+import { drizzle } from "drizzle-orm/neon-http";
 import * as schema from "./schema";
 
 export * from "./schema";
 
-const runtimeEnv = globalThis.process.env;
-
-export function createDb(databaseUrl = runtimeEnv.DATABASE_URL) {
-  const env = createEnv({
-    server: {
-      DATABASE_URL: z.string().url(),
-    },
-    runtimeEnv: {
-      DATABASE_URL: databaseUrl,
-    },
-    emptyStringAsUndefined: true,
+export function createDb(databaseUrl: string) {
+  const env = makeDbEnv({
+    DATABASE_URL: databaseUrl,
   });
 
-  const client = postgres(env.DATABASE_URL, {
-    prepare: false,
-    max: 10,
-  });
+  const client = neon(env.DATABASE_URL);
 
   return drizzle(client, { schema });
 }

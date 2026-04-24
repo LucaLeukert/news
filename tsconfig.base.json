@@ -40,9 +40,12 @@
       }
     ],
     "paths": {
+      "@news/env": ["./packages/env/src/index.ts"],
+      "@news/env/next": ["./packages/env/src/next.ts"],
       "@news/types": ["./packages/types/src/index.ts"],
       "@news/shared": ["./packages/shared/src/index.ts"],
       "@news/platform": ["./packages/platform/src/index.ts"],
+      "@news/convex": ["./packages/convex/index.ts"],
       "@news/db": ["./packages/db/src/index.ts"],
       "@news/ai": ["./packages/ai/src/index.ts"],
       "@news/crawler-core": ["./packages/crawler-core/src/index.ts"],
@@ -50,6 +53,6 @@
       "@news/convex-sync": ["./packages/convex-sync/src/index.ts"]
     }
   },
-  "exclude": ["convex/_generated"],
+  "exclude": ["**/convex/_generated"],
   "$schema": "https://raw.githubusercontent.com/Effect-TS/language-service/refs/heads/main/schema.json"
 }

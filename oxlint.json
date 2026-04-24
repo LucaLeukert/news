@@ -6,7 +6,7 @@
     "**/.turbo/**",
     ".next/**",
     "**/.next/**",
-    "convex/_generated/**",
+    "**/convex/_generated/**",
     "dist/**",
     "**/.wrangler/**",
     "bun.lock",

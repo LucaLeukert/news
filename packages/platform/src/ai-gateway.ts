@@ -1,8 +1,8 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+import type { ServerEnv } from "@news/env";
 import { Output, embedMany, generateText, rerank } from "ai";
 import { Clock, Context, Effect, Layer } from "effect";
 import type { z } from "zod";
-import type { ServerEnv } from "./env";
 import { AiGatewayError } from "./errors";
 import { MetricsLive, MetricsService } from "./metrics";
 
