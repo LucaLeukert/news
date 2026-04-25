@@ -15,8 +15,16 @@
     "db:generate": "bun --env-file ./.env --filter @news/db drizzle-kit generate",
     "db:migrate": "bun --env-file ./.env --filter @news/db drizzle-kit migrate",
     "db:studio": "bun --env-file ./.env --filter @news/db drizzle-kit studio",
+    "reset:local-state": "bash ./scripts/reset-local-state.sh",
+    "api:prepare-local": "node ./scripts/write-api-dev-vars.mjs",
     "api:dev": "bun --filter @news/api dev",
-    "ai:runner": "bun --filter @news/ai-runner dev"
+    "api:dev:lan": "bun --filter @news/api dev:lan",
+    "ai:runner": "bun --filter @news/ai-runner dev",
+    "crawler:seed-and-ingest": "bun --filter @news/crawler dev seed-and-ingest",
+    "remote:ai:sync": "bash ./scripts/sync-remote-ai-runner.sh",
+    "remote:ai:start": "bash ./scripts/start-remote-ai-runner.sh",
+    "remote:ai:start:detached": "bash ./scripts/start-remote-ai-runner-detached.sh",
+    "dev:local": "bash ./scripts/dev-local.sh"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^2.0.41",

@@ -104,7 +104,19 @@ export const toStoryDetailProjection = (detail: StoryDetail, syncedAt: string) =
       byReliability: { ...detail.story.coverage.byReliability },
     },
   },
-  articles: detail.articles.map((article) => ({ ...article })),
+  articles: detail.articles.map((article) => ({
+    id: article.id,
+    sourceId: article.sourceId,
+    canonicalUrl: article.canonicalUrl,
+    title: article.title,
+    snippet: article.snippet,
+    author: article.author,
+    publishedAt: article.publishedAt,
+    language: article.language,
+    articleType: article.articleType,
+    paywalled: article.paywalled,
+    crawlStatus: article.crawlStatus,
+  })),
   syncedAt,
 });
 

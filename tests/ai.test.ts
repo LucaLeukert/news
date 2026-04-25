@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
   StructuredAiLive,
+  aiSchemasByJobType,
   canPublishPublicAiOutput,
   canUseInAggregateLabels,
   featureForAiJobType,
@@ -55,12 +56,12 @@ describe("AI confidence gates", () => {
 
   it("maps each AI feature to the configured local model policy", () => {
     expect(modelPolicy).toEqual({
-      extraction: "Qwen3-4B-Q4_K_M",
-      classification: "Qwen3-4B-Q4_K_M",
-      embeddings: "Qwen3-Embedding-0.6B",
-      reranking: "Qwen3-Reranker-0.6B",
-      editorialReview: "Qwen3-14B-Q4_K_M",
-      publicSummary: "Qwen3-14B-Q4_K_M",
+      extraction: "google/gemma-4-e4b",
+      classification: "google/gemma-4-e4b",
+      embeddings: "text-embedding-qwen3-embedding-0.6b",
+      reranking: "qwen3-reranker-0.6b",
+      editorialReview: "google/gemma-4-e4b",
+      publicSummary: "google/gemma-4-e4b",
     });
 
     expect(modelForAiJobType("article_extraction_qa")).toBe(
@@ -161,5 +162,19 @@ describe("AI confidence gates", () => {
     expect(embeddings[0]).toEqual([0.1, 0.2, 0.3]);
     expect(reranked[0]?.document).toBe("A");
     expect(usedModels).toEqual([modelPolicy.embeddings, modelPolicy.reranking]);
+  });
+
+  it("normalizes out-of-range confidence values at the schema boundary", () => {
+    const output = aiSchemasByJobType.article_extraction_qa.parse({
+      extraction_valid: true,
+      article_type: "news",
+      title_quality: "valid",
+      date_quality: "valid",
+      language_quality: "valid",
+      reasons: [],
+      confidence: 5,
+    });
+
+    expect(output.confidence).toBe(0.5);
   });
 });

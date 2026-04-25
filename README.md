@@ -35,6 +35,43 @@ Use `docker compose up -d postgres model-mock` for local infrastructure.
 or a configured AI model. Use `bun run dev:all` only when you explicitly want
 the full workspace dev graph, including service packages.
 
+## First Ingestion Run
+
+```sh
+bun run db:migrate
+bun run crawler:seed-and-ingest --feed-url <feed-url> --source-name <publisher> --source-domain <publisher-domain> [--country-code <cc>] [--language <lang>]
+```
+
+That seeded crawler command will upsert the source/feed rows, fetch and
+validate feed items, persist article metadata into Postgres, rebuild current
+story clusters, and enqueue `neutral_story_summary` AI jobs.
+
+Then run:
+
+```sh
+bun run api:dev
+bun run ai:runner
+```
+
+The AI runner now uses `LOCAL_MODEL_NAME` for summary generation, so the first
+leased jobs will target the configured local model instead of the static model
+policy defaults.
+
+## Remote AI Runner
+
+To run the AI worker on the Windows LM Studio host:
+
+```sh
+bun run api:dev:lan
+bun run remote:ai:sync
+bun run remote:ai:start
+```
+
+Use [.env.remote-ai.example](/Users/lucaleukert/src/news/.env.remote-ai.example:1)
+as the template for the remote `.env.remote-ai` file. The AI runner now leases
+jobs grouped by model policy order, processing a batch of one model before
+moving to the next to avoid repeated model hot-loading on the LM Studio host.
+
 ## Workspace
 
 - `apps/web`: public story comparison product.

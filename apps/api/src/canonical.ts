@@ -1,26 +1,57 @@
+import { aiJobTypesForModel, canPublishPublicAiOutput, canUseInAggregateLabels } from "@news/ai";
 import { api, toStoryDetailProjection, toStoryProjection } from "@news/convex";
 import {
   aiJobs,
   aiResults,
   articles,
+  claims,
   createDb,
+  entities,
+  sourceRatings,
   stories,
-  storyArticles,
 } from "@news/db";
 import {
+  type ArticleExtractionQaOutput,
+  type BiasContextOutput,
+  type ClaimExtractionOutput,
+  type FactualityReliabilitySupportOutput,
+  type OwnershipExtractionSupportOutput,
+  type SafetyComplianceOutput,
+  articleExtractionQaJobPayloadSchema,
+  claimExtractionJobPayloadSchema,
   decodeUnknownSync,
   neutralStorySummaryJobPayloadSchema,
+  safetyComplianceJobPayloadSchema,
+  sourceAnalysisJobPayloadSchema,
+  storyClusteringSupportJobPayloadSchema,
+  type AiJobType,
   type AiResultEnvelope,
   type LeasedAiJob,
+  type SafetyComplianceJobPayload,
   type StorySummaryOutput,
 } from "@news/types";
-import { and, asc, eq, inArray, lt, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, or } from "drizzle-orm";
 import { ConvexHttpClient } from "convex/browser";
-import { Clock, Data, DateTime, Effect } from "effect";
+import { Data, DateTime, Effect } from "effect";
 import { makePostgresRepository } from "./repository";
 
+const decodeArticleExtractionQaPayload = decodeUnknownSync(
+  articleExtractionQaJobPayloadSchema,
+);
+const decodeClaimExtractionPayload = decodeUnknownSync(
+  claimExtractionJobPayloadSchema,
+);
 const decodeNeutralStorySummaryPayload = decodeUnknownSync(
   neutralStorySummaryJobPayloadSchema,
+);
+const decodeStoryClusteringSupportPayload = decodeUnknownSync(
+  storyClusteringSupportJobPayloadSchema,
+);
+const decodeSourceAnalysisPayload = decodeUnknownSync(
+  sourceAnalysisJobPayloadSchema,
+);
+const decodeSafetyCompliancePayload = decodeUnknownSync(
+  safetyComplianceJobPayloadSchema,
 );
 
 const isStorySummaryOutput = (
@@ -30,6 +61,33 @@ const isStorySummaryOutput = (
   "agreed" in value &&
   "differs" in value &&
   "contestedOrUnverified" in value;
+
+const isArticleExtractionQaOutput = (
+  value: AiResultEnvelope["structured_output"],
+): value is ArticleExtractionQaOutput =>
+  "extraction_valid" in value && "article_type" in value;
+
+const isClaimExtractionOutput = (
+  value: AiResultEnvelope["structured_output"],
+): value is ClaimExtractionOutput => "claims" in value;
+
+const isBiasContextOutput = (
+  value: AiResultEnvelope["structured_output"],
+): value is BiasContextOutput =>
+  "taxonomy_bucket" in value && "publishable" in value;
+
+const isFactualityOutput = (
+  value: AiResultEnvelope["structured_output"],
+): value is FactualityReliabilitySupportOutput => "reliability_band" in value;
+
+const isOwnershipOutput = (
+  value: AiResultEnvelope["structured_output"],
+): value is OwnershipExtractionSupportOutput =>
+  "ownership_category" in value && "citations" in value;
+
+const isSafetyOutput = (
+  value: AiResultEnvelope["structured_output"],
+): value is SafetyComplianceOutput => "safe_to_publish" in value;
 
 class CanonicalStoreError extends Data.TaggedError("CanonicalStoreError")<{
   readonly message: string;
@@ -45,6 +103,20 @@ const tryCanonical = <A>(message: string, try_: () => Promise<A>) =>
 const currentDate = DateTime.now.pipe(Effect.map(DateTime.toDateUtc));
 
 const currentIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
+
+const normalizeEntityKey = (value: string) =>
+  value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+type PersistedAiResultOutcome = {
+  readonly jobType: AiJobType;
+  readonly rebuildStories: boolean;
+  readonly queueProjectionSync: boolean;
+  readonly safetyJobPayload?: SafetyComplianceJobPayload;
+};
 
 const toMutableStoryProjection = (
   story: ReturnType<typeof toStoryProjection>,
@@ -162,7 +234,10 @@ const toMutableStoryDetailProjection = (
 
 export const leaseAiJobFromCanonicalStore = (
   databaseUrl: string,
-  nodeId: string,
+  input: {
+    readonly nodeId: string;
+    readonly model?: string;
+  },
 ): Effect.Effect<LeasedAiJob | null, CanonicalStoreError> =>
   Effect.gen(function* () {
     const db = createDb(databaseUrl);
@@ -172,13 +247,16 @@ export const leaseAiJobFromCanonicalStore = (
       Effect.map(DateTime.toDateUtc),
     );
 
+    const allowedJobTypes = input.model
+      ? aiJobTypesForModel(input.model as never)
+      : null;
     const candidates = yield* tryCanonical("Failed to lease AI job", () =>
       db
         .select()
         .from(aiJobs)
         .where(
           and(
-            eq(aiJobs.type, "neutral_story_summary"),
+            allowedJobTypes ? inArray(aiJobs.type, allowedJobTypes) : undefined,
             or(
               eq(aiJobs.status, "pending"),
               and(eq(aiJobs.status, "leased"), lt(aiJobs.leaseExpiresAt, now)),
@@ -197,7 +275,7 @@ export const leaseAiJobFromCanonicalStore = (
         .update(aiJobs)
         .set({
           status: "leased",
-          leasedBy: nodeId,
+          leasedBy: input.nodeId,
           leaseExpiresAt,
           attempts: job.attempts + 1,
           updatedAt: now,
@@ -205,22 +283,75 @@ export const leaseAiJobFromCanonicalStore = (
         .where(eq(aiJobs.id, job.id)),
     );
 
-    return {
-      id: job.id,
-      type: "neutral_story_summary",
-      payload: decodeNeutralStorySummaryPayload(job.payload),
-      inputArtifactIds: job.inputArtifactIds,
-      leaseExpiresAt: leaseExpiresAt.toISOString(),
-    };
+    switch (job.type) {
+      case "article_extraction_qa":
+        return {
+          id: job.id,
+          type: job.type,
+          payload: decodeArticleExtractionQaPayload(job.payload),
+          inputArtifactIds: job.inputArtifactIds,
+          leaseExpiresAt: leaseExpiresAt.toISOString(),
+        };
+      case "claim_extraction":
+        return {
+          id: job.id,
+          type: job.type,
+          payload: decodeClaimExtractionPayload(job.payload),
+          inputArtifactIds: job.inputArtifactIds,
+          leaseExpiresAt: leaseExpiresAt.toISOString(),
+        };
+      case "story_clustering_support":
+        return {
+          id: job.id,
+          type: job.type,
+          payload: decodeStoryClusteringSupportPayload(job.payload),
+          inputArtifactIds: job.inputArtifactIds,
+          leaseExpiresAt: leaseExpiresAt.toISOString(),
+        };
+      case "neutral_story_summary":
+        return {
+          id: job.id,
+          type: job.type,
+          payload: decodeNeutralStorySummaryPayload(job.payload),
+          inputArtifactIds: job.inputArtifactIds,
+          leaseExpiresAt: leaseExpiresAt.toISOString(),
+        };
+      case "bias_context_classification":
+      case "factuality_reliability_support":
+      case "ownership_extraction_support":
+        return {
+          id: job.id,
+          type: job.type,
+          payload: decodeSourceAnalysisPayload(job.payload),
+          inputArtifactIds: job.inputArtifactIds,
+          leaseExpiresAt: leaseExpiresAt.toISOString(),
+        };
+      case "safety_compliance_check":
+        return {
+          id: job.id,
+          type: job.type,
+          payload: decodeSafetyCompliancePayload(job.payload),
+          inputArtifactIds: job.inputArtifactIds,
+          leaseExpiresAt: leaseExpiresAt.toISOString(),
+        };
+    }
   });
 
 export const persistAiResultToCanonicalStore = (
   databaseUrl: string,
   result: AiResultEnvelope,
-): Effect.Effect<void, CanonicalStoreError> =>
+): Effect.Effect<PersistedAiResultOutcome, CanonicalStoreError> =>
   Effect.gen(function* () {
     const db = createDb(databaseUrl);
     const createdAt = DateTime.toDateUtc(DateTime.makeUnsafe(result.created_at));
+    const [job] = yield* tryCanonical(`Failed to load AI job ${result.job_id}`, () =>
+      db.select().from(aiJobs).where(eq(aiJobs.id, result.job_id)).limit(1),
+    );
+    if (!job) {
+      return yield* new CanonicalStoreError({
+        message: `AI job ${result.job_id} was not found`,
+      });
+    }
     const aiResultRow: typeof aiResults.$inferInsert = {
       jobId: result.job_id,
       modelName: result.model_name,
@@ -260,40 +391,285 @@ export const persistAiResultToCanonicalStore = (
         .where(eq(aiJobs.id, result.job_id)),
     );
 
-    if (!isStorySummaryOutput(result.structured_output)) {
-      return;
+    if (result.validation_status !== "valid") {
+      if (job.type === "neutral_story_summary") {
+        const payload = decodeNeutralStorySummaryPayload(job.payload);
+        yield* tryCanonical(
+          `Failed to clear story summary after invalid AI result ${result.job_id}`,
+          () =>
+            db
+              .update(stories)
+              .set({ summary: null, lastSeenAt: createdAt })
+              .where(eq(stories.id, payload.storyId)),
+        );
+      }
+      return {
+        jobType: job.type,
+        rebuildStories:
+          job.type !== "neutral_story_summary" &&
+          job.type !== "safety_compliance_check",
+        queueProjectionSync:
+          job.type === "neutral_story_summary" ||
+          job.type === "safety_compliance_check",
+      };
     }
     const structuredOutput = result.structured_output;
 
-    const matchingStories = yield* tryCanonical(
-      `Failed to load matching stories for AI result ${result.job_id}`,
-      () =>
-        db
-          .selectDistinct({ storyId: storyArticles.storyId })
-          .from(storyArticles)
-          .where(inArray(storyArticles.articleId, result.input_artifact_ids)),
-    );
+    switch (job.type) {
+      case "article_extraction_qa": {
+        const payload = decodeArticleExtractionQaPayload(job.payload);
+        if (!isArticleExtractionQaOutput(structuredOutput)) {
+          return {
+            jobType: job.type,
+            rebuildStories: false,
+            queueProjectionSync: false,
+          };
+        }
+        yield* tryCanonical(
+          `Failed to apply article QA result ${result.job_id}`,
+          () =>
+            db
+              .update(articles)
+              .set({
+                type: structuredOutput.article_type,
+                crawlStatus: structuredOutput.extraction_valid
+                  ? undefined
+                  : "extraction_failed",
+              })
+              .where(eq(articles.id, payload.article.articleId)),
+        );
+        return {
+          jobType: job.type,
+          rebuildStories: true,
+          queueProjectionSync: false,
+        };
+      }
+      case "claim_extraction": {
+        const payload = decodeClaimExtractionPayload(job.payload);
+        if (!isClaimExtractionOutput(structuredOutput)) {
+          return {
+            jobType: job.type,
+            rebuildStories: false,
+            queueProjectionSync: false,
+          };
+        }
+        yield* tryCanonical(
+          `Failed to reset claims for article ${payload.article.articleId}`,
+          () => db.delete(claims).where(eq(claims.articleId, payload.article.articleId)),
+        );
+        if (structuredOutput.claims.length > 0) {
+          yield* tryCanonical(
+            `Failed to persist claims for article ${payload.article.articleId}`,
+            () =>
+              db.insert(claims).values(
+                structuredOutput.claims.map((claim) => ({
+                  articleId: payload.article.articleId,
+                  claimText: claim.text,
+                  speaker: claim.speaker,
+                  confidence: claim.confidence,
+                  createdAt,
+                })),
+              ),
+          );
+        }
+        return {
+          jobType: job.type,
+          rebuildStories: true,
+          queueProjectionSync: false,
+        };
+      }
+      case "story_clustering_support":
+        return {
+          jobType: job.type,
+          rebuildStories: true,
+          queueProjectionSync: false,
+        };
+      case "bias_context_classification":
+      case "factuality_reliability_support":
+      case "ownership_extraction_support": {
+        const payload = decodeSourceAnalysisPayload(job.payload);
+        const [existing] = yield* tryCanonical(
+          `Failed to load source rating for ${payload.sourceId}`,
+          () =>
+            db
+              .select()
+              .from(sourceRatings)
+              .where(eq(sourceRatings.sourceId, payload.sourceId))
+              .orderBy(desc(sourceRatings.publishedAt), desc(sourceRatings.createdAt))
+              .limit(1),
+        );
+        const publishable = canUseInAggregateLabels(result.confidence);
+        const next = {
+          taxonomyBucket: existing?.taxonomyBucket ?? "unrated",
+          ownershipCategory: existing?.ownershipCategory ?? null,
+          reliabilityBand: existing?.reliabilityBand ?? null,
+          evidence: existing?.evidence ?? [],
+          publishedAt: existing?.publishedAt ?? null,
+        };
 
-    const storyIds = matchingStories.map((row) => row.storyId);
-    if (storyIds.length === 0) return;
+        if (job.type === "bias_context_classification" && isBiasContextOutput(structuredOutput)) {
+          if (structuredOutput.publishable && publishable) {
+            next.taxonomyBucket = structuredOutput.taxonomy_bucket;
+            next.publishedAt = createdAt;
+          }
+        }
+
+        if (job.type === "factuality_reliability_support" && isFactualityOutput(structuredOutput)) {
+          if (publishable) {
+            next.reliabilityBand = structuredOutput.reliability_band;
+            next.publishedAt = next.publishedAt ?? createdAt;
+          }
+        }
+
+        if (job.type === "ownership_extraction_support" && isOwnershipOutput(structuredOutput)) {
+          if (structuredOutput.publishable && publishable) {
+            next.ownershipCategory = structuredOutput.ownership_category;
+            next.evidence = structuredOutput.citations.map((url) => ({
+              url,
+              note: "ai_inferred_ownership",
+            }));
+            next.publishedAt = createdAt;
+          }
+        }
+
+        yield* tryCanonical(
+          `Failed to persist source rating for ${payload.sourceId}`,
+          () =>
+            db.insert(sourceRatings).values({
+              sourceId: payload.sourceId,
+              taxonomyBucket: next.taxonomyBucket,
+              ownershipCategory: next.ownershipCategory,
+              reliabilityBand: next.reliabilityBand,
+              confidence: result.confidence,
+              evidence: next.evidence,
+              publishedAt: next.publishedAt,
+              createdAt,
+            }),
+        );
+        return {
+          jobType: job.type,
+          rebuildStories: true,
+          queueProjectionSync: false,
+        };
+      }
+      case "neutral_story_summary": {
+        const payload = decodeNeutralStorySummaryPayload(job.payload);
+        if (!isStorySummaryOutput(structuredOutput)) {
+          return {
+            jobType: job.type,
+            rebuildStories: false,
+            queueProjectionSync: false,
+          };
+        }
+        if (canPublishPublicAiOutput(result.confidence)) {
+          yield* tryCanonical(
+            `Failed to update story summary for ${payload.storyId}`,
+            () =>
+              db
+                .update(stories)
+                .set({
+                  summary: {
+                    neutralSummary: structuredOutput.neutralSummary,
+                    agreed: structuredOutput.agreed,
+                    differs: structuredOutput.differs,
+                    contestedOrUnverified: structuredOutput.contestedOrUnverified,
+                    confidence: result.confidence,
+                    lastUpdatedAt: result.created_at,
+                  },
+                  lastSeenAt: createdAt,
+                })
+                .where(eq(stories.id, payload.storyId)),
+          );
+        }
+        return {
+          jobType: job.type,
+          rebuildStories: false,
+          queueProjectionSync: false,
+          safetyJobPayload: {
+            storyId: payload.storyId,
+            storyTitle: payload.storyTitle,
+            summary: structuredOutput,
+            articles: payload.articles,
+          },
+        };
+      }
+      case "safety_compliance_check": {
+        const payload = decodeSafetyCompliancePayload(job.payload);
+        if (!isSafetyOutput(structuredOutput)) {
+          return {
+            jobType: job.type,
+            rebuildStories: false,
+            queueProjectionSync: true,
+          };
+        }
+        if (!(structuredOutput.safe_to_publish && canPublishPublicAiOutput(result.confidence))) {
+          yield* tryCanonical(
+            `Failed to clear unsafe story summary for ${payload.storyId}`,
+            () =>
+              db
+                .update(stories)
+                .set({ summary: null, lastSeenAt: createdAt })
+                .where(eq(stories.id, payload.storyId)),
+          );
+        }
+        return {
+          jobType: job.type,
+          rebuildStories: false,
+          queueProjectionSync: true,
+        };
+      }
+    }
+  });
+
+export const enqueueSafetyComplianceJob = (
+  databaseUrl: string,
+  input: SafetyComplianceJobPayload,
+): Effect.Effect<void, CanonicalStoreError> =>
+  Effect.gen(function* () {
+    const db = createDb(databaseUrl);
+    const now = yield* currentDate;
 
     yield* tryCanonical(
-      `Failed to update story summaries for AI result ${result.job_id}`,
+      `Failed to enqueue safety compliance job for story ${input.storyId}`,
       () =>
-        db
-          .update(stories)
-          .set({
-            summary: {
-              neutralSummary: structuredOutput.neutralSummary,
-              agreed: structuredOutput.agreed,
-              differs: structuredOutput.differs,
-              contestedOrUnverified: structuredOutput.contestedOrUnverified,
-              confidence: result.confidence,
-              lastUpdatedAt: result.created_at,
-            },
-            lastSeenAt: createdAt,
-          })
-          .where(inArray(stories.id, storyIds)),
+        db.insert(aiJobs).values({
+          type: "safety_compliance_check",
+          status: "pending",
+          priority: 5,
+          payload: input,
+          inputArtifactIds: [input.storyId, ...input.articles.map((article) => article.id)],
+          leasedBy: null,
+          leaseExpiresAt: null,
+          attempts: 0,
+          lastError: null,
+          createdAt: now,
+          updatedAt: now,
+        }),
+    );
+  });
+
+export const failAiJobInCanonicalStore = (
+  databaseUrl: string,
+  input: {
+    readonly jobId: string;
+    readonly error: string;
+  },
+): Effect.Effect<void, CanonicalStoreError> =>
+  Effect.gen(function* () {
+    const db = createDb(databaseUrl);
+    const now = yield* currentDate;
+
+    yield* tryCanonical(`Failed to mark AI job ${input.jobId} as failed`, () =>
+      db
+        .update(aiJobs)
+        .set({
+          status: "failed",
+          leasedBy: null,
+          leaseExpiresAt: null,
+          lastError: input.error,
+          updatedAt: now,
+        })
+        .where(eq(aiJobs.id, input.jobId)),
     );
   });
 

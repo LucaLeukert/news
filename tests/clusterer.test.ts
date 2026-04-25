@@ -104,4 +104,30 @@ describe("clusterArticles", () => {
       "00000000-0000-4000-8000-000000000201",
     );
   });
+
+  it("uses AI-derived entity keys and fingerprints to cluster rewritten headlines", () => {
+    const clusters = clusterArticles([
+      article(
+        "00000000-0000-4000-8000-000000000301",
+        "Powell faces new pressure after inflation surprise",
+        {
+          aiEntityKeys: ["jerome-powell", "federal-reserve"],
+          semanticCuePhrases: ["fed-rate-path"],
+          semanticFingerprint: "fed-rates-inflation-pressure",
+        },
+      ),
+      article(
+        "00000000-0000-4000-8000-000000000302",
+        "Fed chair confronted as price data rattles policymakers",
+        {
+          aiEntityKeys: ["jerome-powell", "federal-reserve"],
+          semanticCuePhrases: ["fed-rate-path"],
+          semanticFingerprint: "fed-rates-inflation-pressure",
+        },
+      ),
+    ]);
+
+    expect(clusters).toHaveLength(1);
+    expect(clusters[0]?.articles).toHaveLength(2);
+  });
 });

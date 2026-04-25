@@ -1,0 +1,25 @@
+{
+  "name": "@news/newspaper",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "chrono-node": "^2.8.1",
+    "effect": "4.0.0-beta.56",
+    "image-size": "^2.0.2",
+    "linkedom": "^0.18.12",
+    "tldts": "^7.0.9"
+  },
+  "devDependencies": {
+    "typescript": "5.8.3",
+    "vitest": "^3.1.1"
+  }
+}

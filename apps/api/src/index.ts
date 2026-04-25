@@ -29,10 +29,14 @@ import {
   makeFixtureRepository,
 } from "./repository";
 import {
+  enqueueSafetyComplianceJob,
+  failAiJobInCanonicalStore,
   leaseAiJobFromCanonicalStore,
   persistAiResultToCanonicalStore,
   syncCanonicalStoriesToConvex,
 } from "./canonical";
+import { loadOperationsSnapshot } from "./admin";
+import { rebuildStoriesAndQueueAiJobs } from "../../../services/crawler/src/pipeline";
 
 export interface Env {
   DATABASE_URL?: string;
@@ -219,6 +223,23 @@ const makeRpcHandlersLayer = (env: Env) =>
               ),
             };
           }).pipe(Effect.mapError(toRpcError)),
+        GetOperationsSnapshot: (_payload, options) =>
+          Effect.gen(function* () {
+            if (!requireRpcInternalAuth(options.headers, env)) {
+              return yield* Effect.fail(
+                unauthorizedRpcError("Unauthorized RPC operations snapshot"),
+              );
+            }
+            if (!env.DATABASE_URL) {
+              return yield* Effect.fail(
+                unauthorizedRpcError("DATABASE_URL is required for operations snapshot"),
+              );
+            }
+            return yield* loadOperationsSnapshot({
+              databaseUrl: env.DATABASE_URL,
+              convexUrl: env.NEXT_PUBLIC_CONVEX_URL,
+            }).pipe(Effect.mapError(toRpcError));
+          }).pipe(Effect.mapError(toRpcError)),
         ResolveUrl: ({ url }) =>
           Effect.gen(function* () {
             const resolved = yield* repository.resolveUrl(url);
@@ -266,8 +287,28 @@ const makeRpcHandlersLayer = (env: Env) =>
             if (!env.DATABASE_URL) return null;
             return yield* leaseAiJobFromCanonicalStore(
               env.DATABASE_URL,
-              _payload.nodeId,
+              _payload,
             ).pipe(Effect.mapError(toRpcError));
+          }).pipe(Effect.mapError(toRpcError)),
+        FailAiJob: ({ jobId, error }, options) =>
+          Effect.gen(function* () {
+            if (!requireRpcInternalAuth(options.headers, env)) {
+              return yield* Effect.fail(
+                unauthorizedRpcError("Unauthorized RPC AI failure submission"),
+              );
+            }
+            if (!env.DATABASE_URL) {
+              return yield* Effect.fail(
+                unauthorizedRpcError(
+                  "DATABASE_URL is required for AI job failure submission",
+                ),
+              );
+            }
+            yield* failAiJobInCanonicalStore(env.DATABASE_URL, {
+              jobId,
+              error,
+            }).pipe(Effect.mapError(toRpcError));
+            return { status: "accepted" as const };
           }).pipe(Effect.mapError(toRpcError)),
         SubmitAiJobResult: ({ result }, options) =>
           Effect.gen(function* () {
@@ -279,6 +320,21 @@ const makeRpcHandlersLayer = (env: Env) =>
             const parsed = decodeAiResultEnvelope(result);
             yield* enqueue(env.AI_QUEUE, { type: "ai_result", result: parsed });
             return { status: "accepted" as const };
+          }).pipe(Effect.mapError(toRpcError)),
+        SyncPublicStoryProjections: (_payload, options) =>
+          Effect.gen(function* () {
+            if (!requireRpcInternalAuth(options.headers, env)) {
+              return yield* Effect.fail(
+                unauthorizedRpcError("Unauthorized RPC projection sync"),
+              );
+            }
+            yield* enqueue(env.SYNC_QUEUE, {
+              type: "sync_public_story_projections",
+              reason: "ai_result",
+              jobId: "manual-admin-trigger",
+              queuedAt: yield* nowIso,
+            });
+            return { status: "queued" as const };
           }).pipe(Effect.mapError(toRpcError)),
       };
     }),
@@ -435,7 +491,7 @@ const getHandler = (env: Env) => {
         protocol: "http",
       }).pipe(
         Layer.provide(makeRpcHandlersLayer(env).pipe(Layer.provide(repositoryLayer))),
-        Layer.provide(RpcSerialization.layerNdjson),
+        Layer.provide(RpcSerialization.layerJson),
       );
       const appLayer = Layer.mergeAll(httpRoutesLayer, rpcLayer).pipe(
         Layer.provideMerge(makeAppLayer(parsedEnv)),
@@ -492,20 +548,44 @@ export default {
           }
 
           return Effect.gen(function* () {
-            yield* persistAiResultToCanonicalStore(env.DATABASE_URL as string, body.result);
-            const queuedAt = yield* nowIso;
-            yield* enqueue(env.SYNC_QUEUE, {
-              type: "sync_public_story_projections",
-              reason: "ai_result",
-              jobId: body.result.job_id,
-              queuedAt,
-            });
+            const outcome = yield* persistAiResultToCanonicalStore(
+              env.DATABASE_URL as string,
+              body.result,
+            );
+            if (outcome.rebuildStories) {
+              yield* rebuildStoriesAndQueueAiJobs(env.DATABASE_URL as string, {
+                includeClusteringSupportJobs: false,
+              });
+            }
+            if (outcome.safetyJobPayload) {
+              yield* enqueueSafetyComplianceJob(
+                env.DATABASE_URL as string,
+                outcome.safetyJobPayload,
+              );
+            }
+            if (outcome.queueProjectionSync) {
+              const queuedAt = yield* nowIso;
+              yield* enqueue(env.SYNC_QUEUE, {
+                type: "sync_public_story_projections",
+                reason: "ai_result",
+                jobId: body.result.job_id,
+                queuedAt,
+              });
+            }
           });
         }
 
         if (body.type === "sync_public_story_projections") {
           return Effect.gen(function* () {
-            const loadedEnv = yield* loadServerEnv(parsedEnv);
+            const loadedEnv = yield* loadServerEnv(parsedEnv).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ApiRequestError({
+                    message: "Failed to load runtime env for Convex sync",
+                    cause,
+                  }),
+              ),
+            );
             if (!loadedEnv.DATABASE_URL) {
               return yield* new ApiRequestError({
                 message: "DATABASE_URL is required for Convex sync",
@@ -522,6 +602,7 @@ export default {
               convexUrl: loadedEnv.NEXT_PUBLIC_CONVEX_URL,
               serviceToken: loadedEnv.INTERNAL_SERVICE_TOKEN,
             });
+            return;
           });
         }
 

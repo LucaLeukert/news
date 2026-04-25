@@ -184,6 +184,15 @@ export const aiValidationStatusSchema = Schema.Literals([
 ]);
 export type AiValidationStatus = typeof aiValidationStatusSchema.Type;
 
+export const aiJobStatusSchema = Schema.Literals([
+  "pending",
+  "leased",
+  "completed",
+  "failed",
+  "failed_schema_validation",
+]);
+export type AiJobStatus = typeof aiJobStatusSchema.Type;
+
 export const articleExtractionQaOutputSchema = Schema.Struct({
   extraction_valid: Schema.Boolean,
   article_type: articleTypeSchema,
@@ -315,20 +324,154 @@ export const aiStorySummaryJobArticleSchema = Schema.Struct({
 export type AiStorySummaryJobArticle =
   typeof aiStorySummaryJobArticleSchema.Type;
 
+export const aiArticleAnalysisPayloadSchema = Schema.Struct({
+  articleId: uuidString,
+  sourceId: uuidString,
+  sourceName: Schema.String.check(Schema.isMinLength(1)),
+  sourceDomain: Schema.String.check(Schema.isMinLength(1)),
+  countryCode: Schema.NullOr(countryCodeString),
+  title: Schema.String.check(Schema.isMinLength(1)),
+  snippet: Schema.NullOr(Schema.String),
+  author: Schema.NullOr(Schema.String),
+  publishedAt: Schema.NullOr(dateTimeString),
+  language: Schema.NullOr(languageSchema),
+  canonicalUrl: urlString,
+});
+export type AiArticleAnalysisPayload =
+  typeof aiArticleAnalysisPayloadSchema.Type;
+
+export const articleExtractionQaJobPayloadSchema = Schema.Struct({
+  article: aiArticleAnalysisPayloadSchema,
+});
+export type ArticleExtractionQaJobPayload =
+  typeof articleExtractionQaJobPayloadSchema.Type;
+
+export const claimExtractionJobPayloadSchema = Schema.Struct({
+  article: aiArticleAnalysisPayloadSchema,
+});
+export type ClaimExtractionJobPayload =
+  typeof claimExtractionJobPayloadSchema.Type;
+
 export const neutralStorySummaryJobPayloadSchema = Schema.Struct({
+  storyId: uuidString,
   storyTitle: Schema.String.check(Schema.isMinLength(1)),
   articles: Schema.Array(aiStorySummaryJobArticleSchema),
 });
 export type NeutralStorySummaryJobPayload =
   typeof neutralStorySummaryJobPayloadSchema.Type;
 
-export const leasedAiJobSchema = Schema.Struct({
-  id: uuidString,
-  type: Schema.Literal("neutral_story_summary"),
-  payload: neutralStorySummaryJobPayloadSchema,
-  inputArtifactIds: Schema.Array(uuidString),
-  leaseExpiresAt: dateTimeString,
+export const storyClusteringSupportJobPayloadSchema = Schema.Struct({
+  storyId: uuidString,
+  storyTitle: Schema.String.check(Schema.isMinLength(1)),
+  articles: Schema.Array(aiStorySummaryJobArticleSchema),
 });
+export type StoryClusteringSupportJobPayload =
+  typeof storyClusteringSupportJobPayloadSchema.Type;
+
+export const sourceAnalysisJobPayloadSchema = Schema.Struct({
+  sourceId: uuidString,
+  sourceName: Schema.String.check(Schema.isMinLength(1)),
+  domain: Schema.String.check(Schema.isMinLength(1)),
+  countryCode: Schema.NullOr(countryCodeString),
+  primaryLanguage: Schema.NullOr(languageSchema),
+  recentArticleTitles: Schema.Array(
+    Schema.String.check(Schema.isMinLength(1)).check(Schema.isMaxLength(500)),
+  ),
+});
+export type SourceAnalysisJobPayload =
+  typeof sourceAnalysisJobPayloadSchema.Type;
+
+export const safetyComplianceJobPayloadSchema = Schema.Struct({
+  storyId: uuidString,
+  storyTitle: Schema.String.check(Schema.isMinLength(1)),
+  summary: storySummaryOutputSchema,
+  articles: Schema.Array(aiStorySummaryJobArticleSchema),
+});
+export type SafetyComplianceJobPayload =
+  typeof safetyComplianceJobPayloadSchema.Type;
+
+export const aiJobPayloadSchema = Schema.Union([
+  articleExtractionQaJobPayloadSchema,
+  claimExtractionJobPayloadSchema,
+  storyClusteringSupportJobPayloadSchema,
+  neutralStorySummaryJobPayloadSchema,
+  sourceAnalysisJobPayloadSchema,
+  safetyComplianceJobPayloadSchema,
+]);
+export type AiJobPayload = typeof aiJobPayloadSchema.Type;
+
+export const leaseAiJobRequestSchema = Schema.Struct({
+  nodeId: Schema.String,
+  model: Schema.optionalKey(Schema.String),
+});
+export type LeaseAiJobRequest = typeof leaseAiJobRequestSchema.Type;
+
+export const failAiJobRequestSchema = Schema.Struct({
+  jobId: uuidString,
+  error: Schema.String.check(Schema.isMinLength(1)).check(
+    Schema.isMaxLength(4000),
+  ),
+});
+export type FailAiJobRequest = typeof failAiJobRequestSchema.Type;
+
+export const leasedAiJobSchema = Schema.Union([
+  Schema.Struct({
+    id: uuidString,
+    type: Schema.Literal("article_extraction_qa"),
+    payload: articleExtractionQaJobPayloadSchema,
+    inputArtifactIds: Schema.Array(uuidString),
+    leaseExpiresAt: dateTimeString,
+  }),
+  Schema.Struct({
+    id: uuidString,
+    type: Schema.Literal("claim_extraction"),
+    payload: claimExtractionJobPayloadSchema,
+    inputArtifactIds: Schema.Array(uuidString),
+    leaseExpiresAt: dateTimeString,
+  }),
+  Schema.Struct({
+    id: uuidString,
+    type: Schema.Literal("story_clustering_support"),
+    payload: storyClusteringSupportJobPayloadSchema,
+    inputArtifactIds: Schema.Array(uuidString),
+    leaseExpiresAt: dateTimeString,
+  }),
+  Schema.Struct({
+    id: uuidString,
+    type: Schema.Literal("neutral_story_summary"),
+    payload: neutralStorySummaryJobPayloadSchema,
+    inputArtifactIds: Schema.Array(uuidString),
+    leaseExpiresAt: dateTimeString,
+  }),
+  Schema.Struct({
+    id: uuidString,
+    type: Schema.Literal("bias_context_classification"),
+    payload: sourceAnalysisJobPayloadSchema,
+    inputArtifactIds: Schema.Array(uuidString),
+    leaseExpiresAt: dateTimeString,
+  }),
+  Schema.Struct({
+    id: uuidString,
+    type: Schema.Literal("factuality_reliability_support"),
+    payload: sourceAnalysisJobPayloadSchema,
+    inputArtifactIds: Schema.Array(uuidString),
+    leaseExpiresAt: dateTimeString,
+  }),
+  Schema.Struct({
+    id: uuidString,
+    type: Schema.Literal("ownership_extraction_support"),
+    payload: sourceAnalysisJobPayloadSchema,
+    inputArtifactIds: Schema.Array(uuidString),
+    leaseExpiresAt: dateTimeString,
+  }),
+  Schema.Struct({
+    id: uuidString,
+    type: Schema.Literal("safety_compliance_check"),
+    payload: safetyComplianceJobPayloadSchema,
+    inputArtifactIds: Schema.Array(uuidString),
+    leaseExpiresAt: dateTimeString,
+  }),
+]);
 export type LeasedAiJob = typeof leasedAiJobSchema.Type;
 
 export const resolveUrlRequestSchema = Schema.Struct({
@@ -345,6 +488,81 @@ export const storyListQuerySchema = Schema.Struct({
   imbalance: Schema.optionalKey(Schema.Boolean),
 });
 export type StoryListQuery = typeof storyListQuerySchema.Type;
+
+export const adminOverviewSchema = Schema.Struct({
+  sourceCount: nonNegativeInteger,
+  feedCount: nonNegativeInteger,
+  articleCount: nonNegativeInteger,
+  storyCount: nonNegativeInteger,
+  projectedStoryCount: nonNegativeInteger,
+  syncedStoryCount: nonNegativeInteger,
+  heldSummaryCount: nonNegativeInteger,
+  suspiciousSummaryCount: nonNegativeInteger,
+  aiJobsPending: nonNegativeInteger,
+  aiJobsLeased: nonNegativeInteger,
+  aiJobsCompleted: nonNegativeInteger,
+  aiJobsFailed: nonNegativeInteger,
+  latestAiResultAt: Schema.NullOr(dateTimeString),
+});
+export type AdminOverview = typeof adminOverviewSchema.Type;
+
+export const adminSourceFeedStatusSchema = Schema.Struct({
+  sourceId: uuidString,
+  sourceName: nonEmptyString,
+  domain: nonEmptyString,
+  countryCode: Schema.NullOr(countryCodeString),
+  primaryLanguage: Schema.NullOr(languageSchema),
+  rssOnly: Schema.Boolean,
+  noSnippet: Schema.Boolean,
+  doNotCrawl: Schema.Boolean,
+  feedId: uuidString,
+  feedUrl: urlString,
+  validationState: Schema.NullOr(crawlValidationStateSchema),
+  lastFetchedAt: Schema.NullOr(dateTimeString),
+});
+export type AdminSourceFeedStatus = typeof adminSourceFeedStatusSchema.Type;
+
+export const adminAiJobSchema = Schema.Struct({
+  id: uuidString,
+  type: aiJobTypeSchema,
+  status: aiJobStatusSchema,
+  priority: nonNegativeInteger,
+  attempts: nonNegativeInteger,
+  leasedBy: Schema.NullOr(Schema.String),
+  leaseExpiresAt: Schema.NullOr(dateTimeString),
+  lastError: Schema.NullOr(Schema.String),
+  createdAt: dateTimeString,
+  updatedAt: dateTimeString,
+});
+export type AdminAiJob = typeof adminAiJobSchema.Type;
+
+export const adminStorySyncStatusSchema = Schema.Struct({
+  storyId: uuidString,
+  title: Schema.String.check(Schema.isMinLength(1)).check(
+    Schema.isMaxLength(500),
+  ),
+  lastSeenAt: dateTimeString,
+  hasSummary: Schema.Boolean,
+  suspiciousSummary: Schema.Boolean,
+  projected: Schema.Boolean,
+  projectionLastSeenAt: Schema.NullOr(dateTimeString),
+  projectionSyncedAt: Schema.NullOr(dateTimeString),
+});
+export type AdminStorySyncStatus = typeof adminStorySyncStatusSchema.Type;
+
+export const operationsSnapshotSchema = Schema.Struct({
+  overview: adminOverviewSchema,
+  sourceFeeds: Schema.Array(adminSourceFeedStatusSchema),
+  aiJobs: Schema.Array(adminAiJobSchema),
+  storySync: Schema.Array(adminStorySyncStatusSchema),
+});
+export type OperationsSnapshot = typeof operationsSnapshotSchema.Type;
+
+export const syncPublicStoryProjectionsRequestSchema = Schema.Struct({
+  reason: Schema.optionalKey(Schema.String),
+});
+export type SyncPublicStoryProjectionsRequest =
+  typeof syncPublicStoryProjectionsRequestSchema.Type;
 
 export const userFollowTargetTypeSchema = Schema.Literals([
   "topic",
@@ -395,6 +613,59 @@ export function publicConfidenceState(confidence: number) {
   if (confidence >= AI_CONFIDENCE.publish) return "publish";
   if (confidence >= AI_CONFIDENCE.limited) return "limited";
   return "hold";
+}
+
+export function normalizeNarrativeText(value: string) {
+  return value.replace(/\s+/gu, " ").replace(/\u00a0/gu, " ").trim();
+}
+
+export function looksLikePlaceholderText(value: string) {
+  const normalized = normalizeNarrativeText(value);
+  if (normalized.length === 0) return true;
+  if (/^(?:[.…?!"'\-_/\\[\]{}()|:;,*`~]|\.{2,})+$/u.test(normalized)) {
+    return true;
+  }
+  if (/(?:\.\.\.|…{2,}|\?{2,}|_{2,}|\*{2,})/u.test(normalized)) {
+    return true;
+  }
+  if (
+    /(?:the article titled|the article indicates|the article discusses|we only|from the bbc)/iu.test(
+      normalized,
+    )
+  ) {
+    return true;
+  }
+
+  const letterOrDigitCount = Array.from(normalized).filter((character) =>
+    /[\p{L}\p{N}]/u.test(character),
+  ).length;
+  const punctuationCount = Array.from(normalized).filter((character) =>
+    /[^\p{L}\p{N}\s]/u.test(character),
+  ).length;
+
+  if (letterOrDigitCount < 6) return true;
+  if (punctuationCount > letterOrDigitCount) return true;
+  return false;
+}
+
+export function storySummaryLooksSuspicious(summary: StorySummaryOutput | StorySummary) {
+  const lines = [
+    summary.neutralSummary,
+    ...summary.agreed,
+    ...summary.differs,
+    ...summary.contestedOrUnverified,
+    ...("reasons" in summary ? summary.reasons : []),
+  ];
+
+  if (looksLikePlaceholderText(summary.neutralSummary)) return true;
+  if (summary.agreed.some(looksLikePlaceholderText)) return true;
+  if (summary.differs.some(looksLikePlaceholderText)) return true;
+  if (summary.contestedOrUnverified.some(looksLikePlaceholderText)) return true;
+  if ("reasons" in summary && summary.reasons.some(looksLikePlaceholderText)) {
+    return true;
+  }
+
+  return lines.some((line) => /�|[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(line));
 }
 
 export class DomainValidationError extends Data.TaggedError(

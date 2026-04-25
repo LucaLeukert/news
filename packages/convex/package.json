@@ -11,6 +11,7 @@
     "codegen": "bun --env-file ../../.env convex codegen",
     "deploy": "bun --env-file ../../.env convex deploy",
     "dev": "bun --env-file ../../.env convex dev",
+    "dev:local": "bun --env-file ../../.env convex dev",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

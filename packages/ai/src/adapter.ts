@@ -8,6 +8,7 @@ export interface StructuredAiServiceShape {
     readonly prompt: string;
     readonly schema: T;
     readonly feature: GenerativeModelFeature;
+    readonly model?: string;
   }) => Effect.Effect<z.infer<T>, AiGatewayError>;
   readonly embedDocuments: (input: {
     readonly texts: ReadonlyArray<string>;
@@ -40,11 +41,12 @@ export const StructuredAiLive = Layer.effect(
         readonly prompt: string;
         readonly schema: T;
         readonly feature: GenerativeModelFeature;
+        readonly model?: string;
       }) =>
         gateway.generateObject({
           prompt: input.prompt,
           schema: input.schema,
-          model: modelForFeature(input.feature),
+          model: input.model ?? modelForFeature(input.feature),
           maxRetries: 0,
         }),
       embedDocuments: (input: { readonly texts: ReadonlyArray<string> }) =>
@@ -73,6 +75,7 @@ export const generateStructuredJson = <T extends z.ZodTypeAny>(input: {
   readonly prompt: string;
   readonly schema: T;
   readonly feature: GenerativeModelFeature;
+  readonly model?: string;
 }): Effect.Effect<
   z.infer<T>,
   AiGatewayError,

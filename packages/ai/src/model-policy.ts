@@ -1,12 +1,12 @@
 import type { AiJobType } from "@news/types";
 
 export const modelPolicy = {
-  extraction: "Qwen3-4B-Q4_K_M",
-  classification: "Qwen3-4B-Q4_K_M",
-  embeddings: "Qwen3-Embedding-0.6B",
-  reranking: "Qwen3-Reranker-0.6B",
-  editorialReview: "Qwen3-14B-Q4_K_M",
-  publicSummary: "Qwen3-14B-Q4_K_M",
+  extraction: "google/gemma-4-e4b",
+  classification: "google/gemma-4-e4b",
+  embeddings: "text-embedding-qwen3-embedding-0.6b",
+  reranking: "qwen3-reranker-0.6b",
+  editorialReview: "google/gemma-4-e4b",
+  publicSummary: "google/gemma-4-e4b",
 } as const;
 
 export type ModelPolicyFeature = keyof typeof modelPolicy;
@@ -35,3 +35,12 @@ export const featureForAiJobType = (jobType: AiJobType) =>
 
 export const modelForAiJobType = (jobType: AiJobType) =>
   modelForFeature(featureForAiJobType(jobType));
+
+export const aiJobTypesForModel = (model: ModelPolicyName) =>
+  (Object.keys(aiJobModelFeatures) as AiJobType[]).filter(
+    (jobType) => modelForAiJobType(jobType) === model,
+  );
+
+export const modelSequence = Array.from(
+  new Set(Object.values(modelPolicy)),
+) as ReadonlyArray<ModelPolicyName>;

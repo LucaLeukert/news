@@ -50,6 +50,7 @@ export const makeAiGateway = Effect.fn(function* (
   const lmstudio = createOpenAICompatible({
     name: "lmstudio",
     baseURL: env.LOCAL_MODEL_BASE_URL,
+    supportsStructuredOutputs: true,
   });
 
   return {

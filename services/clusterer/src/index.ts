@@ -14,6 +14,7 @@ export type ClusterCandidate = {
   title: string;
   entityKeys: string[];
   publishedAt: string | null;
+  semanticFingerprint: string | null;
 };
 
 export type ClusterableArticle = ArticleMetadata & {
@@ -22,6 +23,9 @@ export type ClusterableArticle = ArticleMetadata & {
   taxonomyBucket?: TaxonomyBucket;
   ownershipCategory?: string | null;
   reliabilityBand?: string | null;
+  aiEntityKeys?: string[];
+  semanticCuePhrases?: string[];
+  semanticFingerprint?: string | null;
 };
 
 export type StoryCluster = {
@@ -30,7 +34,7 @@ export type StoryCluster = {
   articleScores: Record<string, number>;
 };
 
-const DEFAULT_CLUSTER_THRESHOLD = 0.58;
+const DEFAULT_CLUSTER_THRESHOLD = 0.45;
 
 const STOP_WORDS = new Set([
   "a",
@@ -66,6 +70,15 @@ function stableUuidFromText(text: string) {
   return `${hex.slice(0, 8)}-0000-4000-8000-${hex}${hex}`.slice(0, 36);
 }
 
+function fingerprintTokens(value: string | null) {
+  return new Set(
+    (value ?? "")
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((token) => token.length >= 3),
+  );
+}
+
 export function extractEntityKeysFromTitle(title: string) {
   return [
     ...new Set(
@@ -85,8 +98,15 @@ export function toClusterCandidate(
     id: article.id,
     canonicalUrl: article.canonicalUrl,
     title: article.title,
-    entityKeys: extractEntityKeysFromTitle(article.title),
+    entityKeys: [
+      ...new Set([
+        ...extractEntityKeysFromTitle(article.title),
+        ...(article.aiEntityKeys ?? []),
+        ...(article.semanticCuePhrases ?? []),
+      ]),
+    ],
     publishedAt: article.publishedAt,
+    semanticFingerprint: article.semanticFingerprint ?? null,
   };
 }
 
@@ -107,6 +127,16 @@ export function scoreSameStory(a: ClusterCandidate, b: ClusterCandidate) {
   ).length;
   const entityScore =
     sharedEntities / Math.max(a.entityKeys.length, b.entityKeys.length, 1);
+  const fingerprintTokensA = fingerprintTokens(a.semanticFingerprint);
+  const fingerprintTokensB = fingerprintTokens(b.semanticFingerprint);
+  const sharedFingerprintTokens = [...fingerprintTokensA].filter((token) =>
+    fingerprintTokensB.has(token),
+  ).length;
+  const fingerprintScore =
+    fingerprintTokensA.size > 0 && fingerprintTokensB.size > 0
+      ? sharedFingerprintTokens /
+        Math.max(fingerprintTokensA.size, fingerprintTokensB.size, 1)
+      : 0;
   const timeScore =
     a.publishedAt && b.publishedAt
       ? Math.max(
@@ -118,7 +148,12 @@ export function scoreSameStory(a: ClusterCandidate, b: ClusterCandidate) {
       : 0.5;
 
   return Number(
-    (titleScore * 0.45 + entityScore * 0.35 + timeScore * 0.2).toFixed(3),
+    (
+      titleScore * 0.2 +
+      entityScore * 0.25 +
+      fingerprintScore * 0.4 +
+      timeScore * 0.15
+    ).toFixed(3),
   );
 }
 

@@ -48,6 +48,7 @@
       "@news/convex": ["./packages/convex/index.ts"],
       "@news/db": ["./packages/db/src/index.ts"],
       "@news/ai": ["./packages/ai/src/index.ts"],
+      "@news/newspaper": ["./packages/newspaper/src/index.ts"],
       "@news/crawler-core": ["./packages/crawler-core/src/index.ts"],
       "@news/observability": ["./packages/observability/src/index.ts"],
       "@news/convex-sync": ["./packages/convex-sync/src/index.ts"]

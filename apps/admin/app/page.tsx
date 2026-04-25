@@ -1,13 +1,19 @@
 import { UserButton } from "@clerk/nextjs";
 import { auth } from "@clerk/nextjs/server";
-import { api } from "@news/convex";
-import { NewsRpcClient, NewsRpcClientLive } from "@news/platform";
-import { fetchQuery } from "convex/nextjs";
 import { Effect } from "effect";
 import { env } from "../env";
+import {
+  enqueueCrawlAction,
+  resolveUrlAction,
+  syncProjectionAction,
+} from "./actions";
+import { OperationsDashboard } from "./operations-dashboard";
+import { adminRpc } from "./rpc";
 
-export default async function AdminHome() {
-  const [identity, canonicalStories, projectedStories] = await Promise.all([
+export default async function AdminHome(props: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const [identity, snapshot, searchParams] = await Promise.all([
     Effect.runPromise(
       Effect.tryPromise(() => auth()).pipe(
         Effect.catchIf(
@@ -16,99 +22,85 @@ export default async function AdminHome() {
         ),
       ),
     ),
-    Effect.runPromise(
-      Effect.gen(function* () {
-        const rpc = yield* NewsRpcClient;
-        return yield* rpc.listStories({});
-      }).pipe(
-        Effect.provide(
-          NewsRpcClientLive({
-            apiBaseUrl: env.NEXT_PUBLIC_API_BASE_URL,
-            serviceToken: env.INTERNAL_SERVICE_TOKEN,
-          }),
-        ),
-      ),
-    ),
-    fetchQuery(api.storyProjections.listStories, {}),
+    Effect.runPromise(adminRpc((rpc) => rpc.getOperationsSnapshot())),
+    props.searchParams ??
+      Promise.resolve({} as Record<string, string | string[] | undefined>),
   ]);
 
-  const projectedById = new Map(
-    projectedStories.map((story) => [story.id, story] as const),
-  );
-  const healthRows = [
-    ["Canonical stories", String(canonicalStories.length), "Effect RPC -> Neon"],
-    ["Projected stories", String(projectedStories.length), "Convex read model"],
-    [
-      "Projection coverage",
-      `${canonicalStories.filter((story) => projectedById.has(story.id)).length}/${canonicalStories.length}`,
-      "Canonical stories available in Convex",
-    ],
-    [
-      "Held summaries",
-      String(canonicalStories.filter((story) => !story.summary).length),
-      "Stories without publishable summary",
-    ],
-  ];
+  const notice =
+    typeof searchParams.notice === "string" ? searchParams.notice : null;
 
   return (
     <main className="admin-shell">
       <aside className="sidebar">
         <strong>Coverage Lens</strong>
-        <a href="/">Crawl Health</a>
-        <a href="/">AI Jobs</a>
-        <a href="/">Sources</a>
-        <a href="/">Taxonomies</a>
-        <a href="/">Takedowns</a>
+        <a href="#overview">Overview</a>
+        <a href="#controls">Controls</a>
+        <a href="#sources">Sources</a>
+        <a href="#jobs">AI Jobs</a>
+        <a href="#sync">Sync</a>
       </aside>
       <section className="content">
-        <header>
-          <h1>Operations</h1>
-          <p>
-            {identity.userId
-              ? `Authenticated operator ${identity.userId}`
-              : "Cloudflare Access and Clerk should protect this app in production."}
-          </p>
+        <header className="page-header">
+          <div>
+            <h1>Operations</h1>
+            <p>
+              {identity.userId
+                ? `Authenticated operator ${identity.userId}`
+                : "Protected in production by Cloudflare Access and Clerk."}
+            </p>
+            <p className="subtle">
+              API: {env.NEXT_PUBLIC_API_BASE_URL} · Latest AI result:{" "}
+              {snapshot.overview.latestAiResultAt
+                ? new Date(snapshot.overview.latestAiResultAt).toLocaleString()
+                : "never"}
+            </p>
+          </div>
           {env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserButton /> : null}
         </header>
-        <div className="health-grid">
-          {healthRows.map(([label, value, note]) => (
-            <div className="health-cell" key={label}>
-              <span>{label}</span>
-              <strong>{value}</strong>
-              <em>{note}</em>
-            </div>
-          ))}
-        </div>
-        <section className="queue">
-          <h2>Canonical To Projection Sync</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Story</th>
-                <th>Canonical</th>
-                <th>Projection</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {canonicalStories.map((story) => {
-                const projection = projectedById.get(story.id);
-                return (
-                  <tr key={story.id}>
-                    <td>{story.title}</td>
-                    <td>{new Date(story.lastSeenAt).toLocaleString()}</td>
-                    <td>
-                      {projection
-                        ? new Date(projection.lastSeenAt).toLocaleString()
-                        : "missing"}
-                    </td>
-                    <td>{projection ? "synced" : "pending sync"}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+
+        {notice ? <div className="notice">{notice}</div> : null}
+
+        <section className="panel" id="controls">
+          <div className="panel-head">
+            <h2>Controls</h2>
+            <p>RPC-only operational actions for crawl, sync, and URL intake.</p>
+          </div>
+          <div className="control-grid">
+            <form action={enqueueCrawlAction} className="control-card">
+              <h3>RSS Check Sweep</h3>
+              <p>Queue the scheduler-style feed verification pass.</p>
+              <input type="hidden" name="kind" value="rss_checks" />
+              <button type="submit">Queue RSS Checks</button>
+            </form>
+            <form action={enqueueCrawlAction} className="control-card">
+              <h3>Story Refresh Sweep</h3>
+              <p>Queue a stale-story refresh cycle.</p>
+              <input type="hidden" name="kind" value="stale_story_refresh" />
+              <button type="submit">Queue Refresh</button>
+            </form>
+            <form action={syncProjectionAction} className="control-card">
+              <h3>Projection Sync</h3>
+              <p>Push canonical public stories back into Convex.</p>
+              <button type="submit">Queue Sync</button>
+            </form>
+            <form action={resolveUrlAction} className="control-card control-card-wide">
+              <h3>Resolve URL</h3>
+              <p>Match a URL to an existing story or queue it for crawling.</p>
+              <label className="field">
+                <span>Article URL</span>
+                <input
+                  type="url"
+                  name="url"
+                  placeholder="https://example.com/article"
+                  required
+                />
+              </label>
+              <button type="submit">Resolve Or Queue</button>
+            </form>
+          </div>
         </section>
+        <OperationsDashboard initialSnapshot={snapshot} />
       </section>
     </main>
   );

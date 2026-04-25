@@ -39,6 +39,11 @@ export const serverOnlyEnvSchema = {
   LOCAL_MODEL_NAME: z.string().default("gpt-oss-20b"),
   AI_RUNNER_NODE_ID: z.string().default("local-dev"),
   AI_RUNNER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(3000),
+  AI_RUNNER_MAX_BATCH_PER_MODEL: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(25),
   EFFECT_DEVTOOLS: boolish,
 } as const;
 

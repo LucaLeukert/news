@@ -9,10 +9,15 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@news/clusterer": "workspace:*",
+    "@news/db": "workspace:*",
     "@news/crawler-core": "workspace:*",
     "@news/env": "workspace:*",
+    "@news/newspaper": "workspace:*",
     "@news/platform": "workspace:*",
-    "@news/shared": "workspace:*"
+    "@news/shared": "workspace:*",
+    "drizzle-orm": "^0.43.1",
+    "effect": "4.0.0-beta.56"
   },
   "devDependencies": {
     "typescript": "5.8.3"
