@@ -61,7 +61,10 @@ const tryPipeline = <A>(message: string, try_: () => Promise<A>) =>
 const currentDate = DateTime.now.pipe(Effect.map(DateTime.toDateUtc));
 
 const normalizeDomain = (domain: string) =>
-  domain.toLowerCase().replace(/^www\./, "").trim();
+  domain
+    .toLowerCase()
+    .replace(/^www\./, "")
+    .trim();
 
 const toNullableDate = (value: string | null | undefined) =>
   value ? DateTime.toDateUtc(DateTime.makeUnsafe(value)) : null;
@@ -219,7 +222,10 @@ export const persistFeedResults = (
         continue;
       }
 
-      const snippet = snippetFromDescription(metadata.description, input.noSnippet);
+      const snippet = snippetFromDescription(
+        metadata.description,
+        input.noSnippet,
+      );
       const canonicalUrl = normalizeUrl(metadata.canonicalUrl);
       const [article] = yield* tryPipeline(
         `Failed to upsert article ${canonicalUrl}`,
@@ -302,50 +308,53 @@ const loadClusterableArticles = (databaseUrl: string) =>
     const db = createDb(databaseUrl);
     const [articleRows, ratingRows, claimResultRows, clusteringSupportRows] =
       yield* Effect.all([
-      tryPipeline("Failed to load articles for clustering", () =>
-        db
-          .select({
-            article: articles,
-            source: sources,
-          })
-          .from(articles)
-          .innerJoin(sources, eq(articles.sourceId, sources.id))
-          .orderBy(desc(articles.publishedAt), desc(articles.createdAt)),
-      ),
-      tryPipeline("Failed to load source ratings for clustering", () =>
-        db.select().from(sourceRatings).orderBy(desc(sourceRatings.createdAt)),
-      ),
-      tryPipeline("Failed to load claim extraction AI results", () =>
-        db
-          .select({
-            inputArtifactIds: aiResults.inputArtifactIds,
-            structuredOutput: aiResults.structuredOutput,
-          })
-          .from(aiResults)
-          .innerJoin(aiJobs, eq(aiResults.jobId, aiJobs.id))
-          .where(
-            and(
-              eq(aiJobs.type, "claim_extraction"),
-              eq(aiResults.validationStatus, "valid"),
+        tryPipeline("Failed to load articles for clustering", () =>
+          db
+            .select({
+              article: articles,
+              source: sources,
+            })
+            .from(articles)
+            .innerJoin(sources, eq(articles.sourceId, sources.id))
+            .orderBy(desc(articles.publishedAt), desc(articles.createdAt)),
+        ),
+        tryPipeline("Failed to load source ratings for clustering", () =>
+          db
+            .select()
+            .from(sourceRatings)
+            .orderBy(desc(sourceRatings.createdAt)),
+        ),
+        tryPipeline("Failed to load claim extraction AI results", () =>
+          db
+            .select({
+              inputArtifactIds: aiResults.inputArtifactIds,
+              structuredOutput: aiResults.structuredOutput,
+            })
+            .from(aiResults)
+            .innerJoin(aiJobs, eq(aiResults.jobId, aiJobs.id))
+            .where(
+              and(
+                eq(aiJobs.type, "claim_extraction"),
+                eq(aiResults.validationStatus, "valid"),
+              ),
             ),
-          ),
-      ),
-      tryPipeline("Failed to load clustering-support AI results", () =>
-        db
-          .select({
-            inputArtifactIds: aiResults.inputArtifactIds,
-            structuredOutput: aiResults.structuredOutput,
-          })
-          .from(aiResults)
-          .innerJoin(aiJobs, eq(aiResults.jobId, aiJobs.id))
-          .where(
-            and(
-              eq(aiJobs.type, "story_clustering_support"),
-              eq(aiResults.validationStatus, "valid"),
+        ),
+        tryPipeline("Failed to load clustering-support AI results", () =>
+          db
+            .select({
+              inputArtifactIds: aiResults.inputArtifactIds,
+              structuredOutput: aiResults.structuredOutput,
+            })
+            .from(aiResults)
+            .innerJoin(aiJobs, eq(aiResults.jobId, aiJobs.id))
+            .where(
+              and(
+                eq(aiJobs.type, "story_clustering_support"),
+                eq(aiResults.validationStatus, "valid"),
+              ),
             ),
-          ),
-      ),
-    ]);
+        ),
+      ]);
 
     const latestRatings = new Map<string, (typeof ratingRows)[number]>();
     for (const rating of ratingRows) {
@@ -414,7 +423,9 @@ const loadClusterableArticles = (databaseUrl: string) =>
         taxonomyBucket: rating?.taxonomyBucket,
         ownershipCategory: rating?.ownershipCategory ?? null,
         reliabilityBand: rating?.reliabilityBand ?? null,
-        aiEntityKeys: [...(articleEntityKeys.get(article.id) ?? new Set<string>())],
+        aiEntityKeys: [
+          ...(articleEntityKeys.get(article.id) ?? new Set<string>()),
+        ],
         semanticCuePhrases: [
           ...(articleSemanticCues.get(article.id) ?? new Set<string>()),
         ],
@@ -437,10 +448,16 @@ const populateStoryEntities = (
       const entityConfidence = new Map<string, number>();
       for (const article of cluster.articles) {
         for (const key of article.aiEntityKeys ?? []) {
-          entityConfidence.set(key, Math.max(entityConfidence.get(key) ?? 0, 0.75));
+          entityConfidence.set(
+            key,
+            Math.max(entityConfidence.get(key) ?? 0, 0.75),
+          );
         }
         for (const key of article.semanticCuePhrases ?? []) {
-          entityConfidence.set(key, Math.max(entityConfidence.get(key) ?? 0, 0.6));
+          entityConfidence.set(
+            key,
+            Math.max(entityConfidence.get(key) ?? 0, 0.6),
+          );
         }
       }
 
@@ -456,18 +473,16 @@ const populateStoryEntities = (
         );
         const entityId =
           existing?.id ??
-          (
-            yield* tryPipeline(`Failed to create entity ${canonicalKey}`, () =>
-              db
-                .insert(entities)
-                .values({
-                  name: canonicalKey.replace(/-/g, " "),
-                  type: "ai_extracted",
-                  canonicalKey,
-                })
-                .returning({ id: entities.id }),
-            )
-          )[0]?.id;
+          (yield* tryPipeline(`Failed to create entity ${canonicalKey}`, () =>
+            db
+              .insert(entities)
+              .values({
+                name: canonicalKey.replace(/-/g, " "),
+                type: "ai_extracted",
+                canonicalKey,
+              })
+              .returning({ id: entities.id }),
+          ))[0]?.id;
 
         if (!entityId) {
           continue;
@@ -503,15 +518,17 @@ const enqueueArticleAndSourceAiJobs = (
 
     const db = createDb(databaseUrl);
     const now = yield* currentDate;
-    const articleRows = yield* tryPipeline("Failed to load articles for AI enqueue", () =>
-      db
-        .select({
-          article: articles,
-          source: sources,
-        })
-        .from(articles)
-        .innerJoin(sources, eq(articles.sourceId, sources.id))
-        .where(inArray(articles.id, [...input.articleIds])),
+    const articleRows = yield* tryPipeline(
+      "Failed to load articles for AI enqueue",
+      () =>
+        db
+          .select({
+            article: articles,
+            source: sources,
+          })
+          .from(articles)
+          .innerJoin(sources, eq(articles.sourceId, sources.id))
+          .where(inArray(articles.id, [...input.articleIds])),
     );
     const first = articleRows[0];
     if (!first) {
@@ -575,7 +592,9 @@ const enqueueArticleAndSourceAiJobs = (
       domain: first.source.domain,
       countryCode: first.source.countryCode,
       primaryLanguage: first.source.primaryLanguage,
-      recentArticleTitles: articleRows.map((row) => row.article.title).slice(0, 8),
+      recentArticleTitles: articleRows
+        .map((row) => row.article.title)
+        .slice(0, 8),
     };
     const sourceJobs: Array<typeof aiJobs.$inferInsert> = [
       {
@@ -644,6 +663,20 @@ export const rebuildStoriesAndQueueAiJobs = (
       const now = yield* currentDate;
       const clusterableArticles = yield* loadClusterableArticles(databaseUrl);
       const clusters = clusterArticles(clusterableArticles);
+
+      yield* Effect.logInfo("Rebuilding stories with clustered articles", {
+        articleCount: clusterableArticles.length,
+        storyCount: clusters.length,
+        clusters: clusters.map((cluster): typeof stories.$inferInsert => ({
+          id: cluster.story.id,
+          title: cluster.story.title,
+          summary: null,
+          topicTags: [...cluster.story.topicTags],
+          firstSeenAt: toNullableDate(cluster.story.firstSeenAt) ?? now,
+          lastSeenAt: toNullableDate(cluster.story.lastSeenAt) ?? now,
+          disabledAt: null,
+        })),
+      });
 
       yield* tryPipeline("Failed to reset story entities", () =>
         db.delete(storyEntities),

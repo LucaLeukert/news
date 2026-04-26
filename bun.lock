@@ -208,7 +208,6 @@
         "@clerk/backend": "^3.2.13",
         "@news/env": "workspace:*",
         "@news/types": "workspace:*",
-        "@openrouter/ai-sdk-provider": "^2.8.0",
         "ai": "^6.0.168",
         "effect": "4.0.0-beta.56",
         "zod": "^3.24.3",
@@ -554,8 +553,6 @@
     "@next/swc-win32-x64-msvc": ["@next/swc-win32-x64-msvc@15.5.15", "", { "os": "win32", "cpu": "x64" }, "sha512-nFucjVdwlFqxh/JG3hWSJ4p8+YJV7Ii8aPDuBQULB6DzUF4UNZETXLfEUk+oI2zEznWWULPt7MeuTE6xtK1HSA=="],
 
     "@nodable/entities": ["@nodable/entities@2.1.0", "", {}, "sha512-nyT7T3nbMyBI/lvr6L5TyWbFJAI9FTgVRakNoBqCD+PmID8DzFrrNdLLtHMwMszOtqZa8PAOV24ZqDnQrhQINA=="],
-
-    "@openrouter/ai-sdk-provider": ["@openrouter/ai-sdk-provider@2.8.0", "", { "peerDependencies": { "ai": "^6.0.0", "zod": "^3.25.0 || ^4.0.0" } }, "sha512-oDDW/0KMqz4suHVloB9sNv0YyKLGNYf1FTevXH6adDkid5dsmbbcYuiEsbIhpZSZtHa6o5AVjK1jEAfePOLxww=="],
 
     "@opentelemetry/api": ["@opentelemetry/api@1.9.0", "", {}, "sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg=="],
 

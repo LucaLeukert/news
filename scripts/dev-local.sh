@@ -6,7 +6,7 @@ cd "${ROOT_DIR}"
 
 bun run api:prepare-local
 bash ./scripts/sync-remote-ai-runner.sh
-bash ./scripts/start-remote-ai-runner-detached.sh
+#bash ./scripts/start-remote-ai-runner-detached.sh
 
 exec bun --env-file ./.env turbo dev:local \
   --filter=@news/api \

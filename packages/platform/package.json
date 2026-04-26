@@ -12,7 +12,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@openrouter/ai-sdk-provider": "^2.8.0",
     "@ai-sdk/openai-compatible": "^2.0.41",
     "@clerk/backend": "^3.2.13",
     "@news/env": "workspace:*",
