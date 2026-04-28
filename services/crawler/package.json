@@ -9,6 +9,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@news/ai": "workspace:*",
     "@news/clusterer": "workspace:*",
     "@news/db": "workspace:*",
     "@news/crawler-core": "workspace:*",

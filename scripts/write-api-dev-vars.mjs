@@ -9,8 +9,6 @@ const allowedKeys = [
   "DATABASE_URL",
   "INTERNAL_SERVICE_TOKEN",
   "CLERK_SECRET_KEY",
-  "LOCAL_MODEL_BASE_URL",
-  "LOCAL_MODEL_NAME",
   "NEXT_PUBLIC_CONVEX_URL",
 ];
 
@@ -25,12 +23,13 @@ for (const line of source.split(/\r?\n/u)) {
   values.set(trimmed.slice(0, separator), trimmed.slice(separator + 1));
 }
 
-const body = allowedKeys
-  .map((key) => {
-    const value = values.get(key);
-    return value ? `${key}=${value}` : null;
-  })
-  .filter((line) => line !== null)
+const body = [...values.entries()]
+  .filter(
+    ([key, value]) =>
+      Boolean(value) &&
+      (allowedKeys.includes(key) || key.startsWith("AI_")),
+  )
+  .map(([key, value]) => `${key}=${value}`)
   .join("\n");
 
 mkdirSync(dirname(targetPath), { recursive: true });

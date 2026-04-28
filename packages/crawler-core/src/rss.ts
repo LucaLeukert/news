@@ -13,6 +13,47 @@ const parser = new XMLParser({
   attributeNamePrefix: "@_",
 });
 
+const htmlNamedEntities = {
+  amp: "&",
+  quot: '"',
+  apos: "'",
+  lt: "<",
+  gt: ">",
+  nbsp: " ",
+} as const;
+
+export const decodeHtmlEntities = (value: string) =>
+  value.replaceAll(/&(#x?[0-9a-f]+|[a-z]+);/gi, (entity, rawCode) => {
+    const code = rawCode.toLowerCase();
+    if (code in htmlNamedEntities) {
+      return htmlNamedEntities[code as keyof typeof htmlNamedEntities];
+    }
+
+    if (code.startsWith("#x")) {
+      const parsed = Number.parseInt(code.slice(2), 16);
+      return Number.isNaN(parsed) ? entity : String.fromCodePoint(parsed);
+    }
+
+    if (code.startsWith("#")) {
+      const parsed = Number.parseInt(code.slice(1), 10);
+      return Number.isNaN(parsed) ? entity : String.fromCodePoint(parsed);
+    }
+
+    return entity;
+  });
+
+const toIsoDateOrNull = (value: unknown) => {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return null;
+  }
+
+  try {
+    return DateTime.formatIso(DateTime.makeUnsafe(value));
+  } catch {
+    return null;
+  }
+};
+
 function asArray<T>(value: T | T[] | undefined): T[] {
   if (!value) return [];
   return Array.isArray(value) ? value : [value];
@@ -27,13 +68,16 @@ export function parseFeed(xml: string): FeedItem[] {
       if (!item.title || !url) return [];
       return [
         {
-          title: String(item.title),
+          title: decodeHtmlEntities(String(item.title)),
           url: String(url),
-          publishedAt: item.pubDate
-            ? DateTime.formatIso(DateTime.makeUnsafe(String(item.pubDate)))
-            : null,
+          publishedAt: toIsoDateOrNull(item.pubDate),
           sourceName:
-            item.source?.["#text"] ?? item.source ?? channel.title ?? null,
+            typeof (item.source?.["#text"] ?? item.source ?? channel.title) ===
+            "string"
+              ? decodeHtmlEntities(
+                  String(item.source?.["#text"] ?? item.source ?? channel.title),
+                )
+              : null,
         },
       ];
     });
@@ -47,14 +91,15 @@ export function parseFeed(xml: string): FeedItem[] {
     const url = link?.["@_href"] ?? link;
     if (!entry.title || !url) return [];
     return [
-      {
-        title: String(entry.title?.["#text"] ?? entry.title),
-        url: String(url),
-        publishedAt: entry.published
-          ? DateTime.formatIso(DateTime.makeUnsafe(String(entry.published)))
-          : null,
-        sourceName: doc.feed?.title ?? null,
-      },
+        {
+          title: decodeHtmlEntities(String(entry.title?.["#text"] ?? entry.title)),
+          url: String(url),
+          publishedAt: toIsoDateOrNull(entry.published),
+          sourceName:
+            typeof doc.feed?.title === "string"
+              ? decodeHtmlEntities(doc.feed.title)
+              : null,
+        },
     ];
   });
 }

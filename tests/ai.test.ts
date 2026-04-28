@@ -9,9 +9,11 @@ import {
   featureForAiJobType,
   generateEmbeddings,
   generateStructuredJson,
+  localTestModelPolicy,
   modelForAiJobType,
   modelPolicy,
   rerankDocuments,
+  resolveModelPolicy,
 } from "../packages/ai/src";
 import { AiGateway, MetricsNoop } from "../packages/platform/src";
 import {
@@ -79,6 +81,35 @@ describe("AI confidence gates", () => {
     expect(featureForAiJobType("neutral_story_summary")).toBe("publicSummary");
   });
 
+  it("resolves the active model policy from the configured profile", () => {
+    expect(
+      resolveModelPolicy({
+        AI_MODEL_POLICY_PROFILE: "local_test",
+        AI_MODEL_REAL_EXTRACTION: "real-extraction",
+        AI_MODEL_REAL_CLASSIFICATION: "real-classification",
+        AI_MODEL_REAL_EMBEDDINGS: "real-embeddings",
+        AI_MODEL_REAL_RERANKING: "real-reranking",
+        AI_MODEL_REAL_EDITORIAL_REVIEW: "real-editorial",
+        AI_MODEL_REAL_PUBLIC_SUMMARY: "real-summary",
+        AI_MODEL_LOCAL_TEST_EXTRACTION: "local-extraction",
+        AI_MODEL_LOCAL_TEST_CLASSIFICATION: "local-classification",
+        AI_MODEL_LOCAL_TEST_EMBEDDINGS: "local-embeddings",
+        AI_MODEL_LOCAL_TEST_RERANKING: "local-reranking",
+        AI_MODEL_LOCAL_TEST_EDITORIAL_REVIEW: "local-editorial",
+        AI_MODEL_LOCAL_TEST_PUBLIC_SUMMARY: "local-summary",
+      }),
+    ).toEqual({
+      extraction: "local-extraction",
+      classification: "local-classification",
+      embeddings: "local-embeddings",
+      reranking: "local-reranking",
+      editorialReview: "local-editorial",
+      publicSummary: "local-summary",
+    });
+
+    expect(localTestModelPolicy.publicSummary).toBe("gemma3:1b");
+  });
+
   it("decodes structured model output through Effect layers", async () => {
     let usedModel: string | undefined;
     const AiGatewayTest = Layer.succeed(AiGateway, {
@@ -113,7 +144,7 @@ describe("AI confidence gates", () => {
         }),
         feature: "publicSummary",
       }).pipe(
-        Effect.provide(StructuredAiLive),
+        Effect.provide(StructuredAiLive()),
         Effect.provide(AiGatewayTest),
         Effect.provide(MetricsNoop),
       ),
@@ -142,7 +173,7 @@ describe("AI confidence gates", () => {
 
     const embeddings = await Effect.runPromise(
       generateEmbeddings({ texts: ["story text"] }).pipe(
-        Effect.provide(StructuredAiLive),
+        Effect.provide(StructuredAiLive()),
         Effect.provide(AiGatewayTest),
         Effect.provide(MetricsNoop),
       ),
@@ -153,7 +184,7 @@ describe("AI confidence gates", () => {
         documents: ["A", "B"],
         topN: 1,
       }).pipe(
-        Effect.provide(StructuredAiLive),
+        Effect.provide(StructuredAiLive()),
         Effect.provide(AiGatewayTest),
         Effect.provide(MetricsNoop),
       ),

@@ -12,6 +12,7 @@ import {
   modelForAiJobType,
   modelSequence,
   ownershipExtractionPrompt,
+  resolveModelPolicy,
   safetyCompliancePrompt,
   sanitizeStructuredOutput,
   storyClusteringSupportPrompt,
@@ -131,9 +132,10 @@ const completeJob = (env: ServerEnv, job: LeasedAiJob) =>
   Effect.gen(function* () {
     const rpc = yield* NewsRpcClient;
     const metrics = yield* MetricsService;
+    const activeModelPolicy = resolveModelPolicy(env);
     const schema = aiSchemasByJobType[job.type];
     const modelFeature = featureForAiJobType(job.type);
-    const model = modelForAiJobType(job.type);
+    const model = modelForAiJobType(job.type, activeModelPolicy);
     const started = yield* Clock.currentTimeMillis;
     const rawOutput = yield* generateStructuredJson({
       prompt: promptFor(job),
@@ -210,8 +212,9 @@ const completeJob = (env: ServerEnv, job: LeasedAiJob) =>
 const pollOnce = (env: ServerEnv, nodeId: string) =>
   Effect.gen(function* () {
     const metrics = yield* MetricsService;
+    const activeModelPolicy = resolveModelPolicy(env);
     yield* metrics.increment("ai.runner_uptime", { nodeId });
-    for (const model of modelSequence) {
+    for (const model of modelSequence(activeModelPolicy)) {
       const jobs = yield* leaseBatch(
         nodeId,
         model,
@@ -243,10 +246,13 @@ const pollOnce = (env: ServerEnv, nodeId: string) =>
 
 const main = (env: ServerEnv) =>
   Effect.gen(function* () {
+    const activeModelPolicy = resolveModelPolicy(env);
     yield* Effect.logInfo("ai_runner.started", {
       nodeId: env.AI_RUNNER_NODE_ID,
       apiBase: apiBaseFromEnv(env),
-      modelSequence,
+      aiHostProfile: env.AI_HOST_PROFILE,
+      aiModelPolicyProfile: env.AI_MODEL_POLICY_PROFILE,
+      modelSequence: modelSequence(activeModelPolicy),
     });
     yield* pollOnce(env, env.AI_RUNNER_NODE_ID).pipe(
       Effect.repeat(Schedule.fixed(`${env.AI_RUNNER_POLL_INTERVAL_MS} millis`)),
@@ -255,8 +261,11 @@ const main = (env: ServerEnv) =>
 
 if (import.meta.main) {
   const env = await Effect.runPromise(loadServerEnv(process.env));
+  const activeModelPolicy = resolveModelPolicy(env);
   const appLayer = Layer.merge(
-    StructuredAiLive.pipe(Layer.provideMerge(makeAppLayer(env))),
+    StructuredAiLive(activeModelPolicy).pipe(
+      Layer.provideMerge(makeAppLayer(env)),
+    ),
     NewsRpcClientLive({
       apiBaseUrl: apiBaseFromEnv(env),
       serviceToken: serviceTokenFromEnv(env),

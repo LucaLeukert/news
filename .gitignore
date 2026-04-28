@@ -12,3 +12,5 @@ dist
 .dev.vars.*
 coverage
 *.tsbuildinfo
+tmp/
+*.log

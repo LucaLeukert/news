@@ -384,7 +384,7 @@ export function makePostgresRepository(databaseUrl: string): NewsRepositoryShape
               .select()
               .from(sourceRatings)
               .where(eq(sourceRatings.sourceId, id))
-              .orderBy(desc(sourceRatings.publishedAt), desc(sourceRatings.createdAt))
+              .orderBy(desc(sourceRatings.createdAt))
               .limit(1),
         );
         const rating = ratingsRows[0] ?? null;

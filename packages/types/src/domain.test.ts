@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   looksLikePlaceholderText,
+  shouldTreatArticleExtractionAsValid,
   storySummaryLooksSuspicious,
 } from "./domain";
 
@@ -35,5 +36,35 @@ describe("storySummaryLooksSuspicious", () => {
         reasons: ["..."],
       }),
     ).toBe(true);
+  });
+});
+
+describe("shouldTreatArticleExtractionAsValid", () => {
+  it("keeps clearly valid article metadata eligible even when the model flips extraction_valid", () => {
+    expect(
+      shouldTreatArticleExtractionAsValid({
+        extraction_valid: false,
+        article_type: "news",
+        title_quality: "valid",
+        date_quality: "valid",
+        language_quality: "valid",
+        reasons: [],
+        confidence: 0.95,
+      }),
+    ).toBe(true);
+  });
+
+  it("still rejects outputs that are explicitly non-article-like", () => {
+    expect(
+      shouldTreatArticleExtractionAsValid({
+        extraction_valid: false,
+        article_type: "non_article",
+        title_quality: "valid",
+        date_quality: "valid",
+        language_quality: "valid",
+        reasons: [],
+        confidence: 0.95,
+      }),
+    ).toBe(false);
   });
 });

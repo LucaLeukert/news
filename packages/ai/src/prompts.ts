@@ -25,7 +25,8 @@ export function articleExtractionQaPrompt(input: {
   return [
     "Review only the supplied article metadata.",
     "Classify whether this looks like a news article, opinion, liveblog, press release, satire, sponsored content, duplicate, or non-article.",
-    "Set extraction_valid to false when the metadata looks too incomplete, mismatched, or obviously not article-like.",
+    "Set extraction_valid to false only when the metadata looks too incomplete, mismatched, or obviously not article-like.",
+    "If article_type is news, opinion, liveblog, or press_release and title/date/language quality are all valid, extraction_valid should usually be true.",
     "Return JSON with extraction_valid, article_type, title_quality, date_quality, language_quality, reasons, confidence.",
     JSON.stringify(input.article),
   ].join("\n\n");

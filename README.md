@@ -53,9 +53,10 @@ bun run api:dev
 bun run ai:runner
 ```
 
-The AI runner now uses `LOCAL_MODEL_NAME` for summary generation, so the first
-leased jobs will target the configured local model instead of the static model
-policy defaults.
+The AI runner now uses the global AI host and model policy settings from
+`.env`. For local `ollama` testing, set `AI_HOST_PROFILE=local`,
+`AI_MODEL_POLICY_PROFILE=local_test`, and keep
+`AI_HOST_LOCAL_BASE_URL=http://localhost:11434/v1`.
 
 ## Remote AI Runner
 
@@ -68,9 +69,26 @@ bun run remote:ai:start
 ```
 
 Use [.env.remote-ai.example](/Users/lucaleukert/src/news/.env.remote-ai.example:1)
-as the template for the remote `.env.remote-ai` file. The AI runner now leases
-jobs grouped by model policy order, processing a batch of one model before
-moving to the next to avoid repeated model hot-loading on the LM Studio host.
+as the template for the remote `.env.remote-ai` file. Set
+`AI_HOST_PROFILE=real` and `AI_MODEL_POLICY_PROFILE=real` there so the Windows
+runner keeps using the real host and production model map. The runner leases
+jobs grouped by the active model policy order, processing a batch of one model
+before moving to the next to avoid repeated model hot-loading on the active
+host.
+
+## AI Switching
+
+The global switches live in `.env`:
+
+- `AI_HOST_PROFILE=local|real`
+- `AI_MODEL_POLICY_PROFILE=local_test|real`
+
+`bun run dev:local` now honors `AI_HOST_PROFILE`:
+
+- `local`: starts the local `@news/ai-runner` inside Turbo and skips the
+  Windows sync step.
+- `real`: syncs the Windows AI runner and keeps the local Turbo graph focused
+  on the web/admin/api stack.
 
 ## Workspace
 

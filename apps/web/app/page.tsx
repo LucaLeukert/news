@@ -1,13 +1,12 @@
-import { api } from "@news/convex";
-import { fetchQuery } from "convex/nextjs";
 import Link from "next/link";
 import { env } from "../env";
 import { AccountBar } from "./account-bar";
+import { loadPublicStories } from "./public-story-projection-sync";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const stories = await fetchQuery(api.storyProjections.listStories, {});
+  const stories = await loadPublicStories();
 
   return (
     <main className="shell">

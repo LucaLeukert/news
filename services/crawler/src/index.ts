@@ -1,14 +1,9 @@
+import { StructuredAiLive, resolveModelPolicy } from "@news/ai";
 import {
-  extractMetadataEffect,
   makeSnippet,
   parseFeed,
   validateFeedItemAgainstPage,
 } from "@news/crawler-core";
-import {
-  Article as NewspaperArticle,
-  Configuration as NewspaperConfiguration,
-  CrawlerHttpLive,
-} from "@news/newspaper";
 import {
   HttpService,
   MetricsService,
@@ -17,43 +12,13 @@ import {
 } from "@news/platform";
 import { loadServerEnv } from "@news/env";
 import { USER_AGENT } from "@news/types";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
+import { parseArticleWithNewspaper } from "./article-metadata";
 import { runSeededFeedIngestion, type SeedSourceInput } from "./pipeline";
-
-const newspaperConfig = new NewspaperConfiguration({
-  fetchImages: false,
-});
-
-const parseArticleWithNewspaper = (url: string, html: string) =>
-  Effect.gen(function* () {
-    const article = new NewspaperArticle(
-      url,
-      "",
-      "",
-      "",
-      new NewspaperConfiguration({
-        ...newspaperConfig,
-        fetchImages: false,
-      }),
-    );
-    article.html = html;
-    yield* article.parse().pipe(Effect.provide(CrawlerHttpLive));
-
-    return {
-      canonicalUrl: article.canonicalLink || article.url,
-      title: article.title || null,
-      description: article.metaDescription || null,
-      author: article.authors[0] ?? null,
-      publishedAt: article.publishDate?.toISOString() ?? null,
-      language: article.metaLang || article.config.language || null,
-      paywalled: false,
-    };
-  }).pipe(
-    Effect.catchIf(
-      () => true,
-      () => extractMetadataEffect(html, url),
-    ),
-  );
+import {
+  reingestFailedVerificationArticles,
+  type ReingestFailedVerificationInput,
+} from "./reingest";
 
 export const ingestFeed = (feedUrl: string) =>
   Effect.gen(function* () {
@@ -155,10 +120,27 @@ const seedInputFromFlags = (flags: Map<string, string>): SeedSourceInput => ({
   noSnippet: flags.get("no-snippet") === "true",
 });
 
+const reingestInputFromFlags = (
+  flags: Map<string, string>,
+): ReingestFailedVerificationInput => ({
+  statuses: (flags.get("statuses") ?? "rss_mismatch_title,rss_mismatch_date")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0) as ReingestFailedVerificationInput["statuses"],
+  sourceDomain: flags.get("source-domain") ?? null,
+  limit: flags.get("limit") ? Number(flags.get("limit")) : 100,
+  overrideTitleMismatches: flags.get("override-title-mismatches") === "true",
+});
+
 if (import.meta.main) {
   const args = parseArgs(process.argv.slice(2));
   const env = await Effect.runPromise(loadServerEnv(process.env));
   const appLayer = makeAppLayer(env);
+  const activeModelPolicy = resolveModelPolicy(env);
+  const structuredAiLayer = StructuredAiLive(resolveModelPolicy(env)).pipe(
+    Layer.provide(appLayer),
+  );
+  const crawlerLayer = Layer.mergeAll(appLayer, structuredAiLayer);
 
   if (args.positional[0] === "seed-and-ingest") {
     if (!env.DATABASE_URL) {
@@ -173,7 +155,8 @@ if (import.meta.main) {
       runSeededFeedIngestion(env.DATABASE_URL, {
         ...seedInput,
         results,
-      }),
+        aiModelPolicy: activeModelPolicy,
+      }).pipe(Effect.provide(crawlerLayer)),
     );
     await runMain(
       Effect.logInfo("crawler.seed_and_ingest.completed", {
@@ -181,6 +164,25 @@ if (import.meta.main) {
         feedUrl: seedInput.feedUrl,
         ...persisted,
       }).pipe(Effect.provide(appLayer)),
+    );
+  } else if (args.positional[0] === "reingest-failed-verification") {
+    if (!env.DATABASE_URL) {
+      throw new Error("DATABASE_URL is required for reingest-failed-verification");
+    }
+
+    const outcome = await runMain(
+      reingestFailedVerificationArticles(
+        env.DATABASE_URL,
+        {
+          ...reingestInputFromFlags(args.flags),
+          aiModelPolicy: activeModelPolicy,
+        },
+      ).pipe(Effect.provide(crawlerLayer)),
+    );
+    await runMain(
+      Effect.logInfo("crawler.reingest_failed_verification.completed", outcome).pipe(
+        Effect.provide(appLayer),
+      ),
     );
   } else {
     const feedUrl = args.positional[0];
@@ -190,6 +192,7 @@ if (import.meta.main) {
           "Usage:",
           "  bun src/index.ts <feed-url>",
           "  bun src/index.ts seed-and-ingest --feed-url <url> --source-name <name> --source-domain <domain> [--country-code <cc>] [--language <lang>] [--rss-only] [--no-snippet]",
+          "  bun src/index.ts reingest-failed-verification [--statuses <csv>] [--source-domain <domain>] [--limit <n>] [--override-title-mismatches]",
         ].join("\n"),
       );
     }

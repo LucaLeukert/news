@@ -164,10 +164,33 @@ export const crawlEnqueueRequestSchema = Schema.Struct({
 });
 export type CrawlEnqueueRequest = typeof crawlEnqueueRequestSchema.Type;
 
+export const reingestFailedVerificationRequestSchema = Schema.Struct({
+  statuses: Schema.Array(crawlValidationStateSchema),
+  sourceDomain: Schema.NullOr(Schema.String),
+  limit: nonNegativeInteger,
+  overrideTitleMismatches: Schema.Boolean,
+});
+export type ReingestFailedVerificationRequest =
+  typeof reingestFailedVerificationRequestSchema.Type;
+
+export const reingestFailedVerificationResultSchema = Schema.Struct({
+  processedCount: nonNegativeInteger,
+  reverifiedCount: nonNegativeInteger,
+  overriddenToVerifiedCount: nonNegativeInteger,
+  stillFailingCount: nonNegativeInteger,
+  skippedMissingFeedMetadataCount: nonNegativeInteger,
+  articleAiJobCount: nonNegativeInteger,
+  sourceAiJobCount: nonNegativeInteger,
+  storyCount: nonNegativeInteger,
+});
+export type ReingestFailedVerificationResult =
+  typeof reingestFailedVerificationResultSchema.Type;
+
 export const aiJobTypeSchema = Schema.Literals([
   "article_extraction_qa",
   "claim_extraction",
   "story_clustering_support",
+  "semantic_story_clustering_support",
   "neutral_story_summary",
   "bias_context_classification",
   "factuality_reliability_support",
@@ -225,6 +248,24 @@ export const storyClusteringSupportOutputSchema = Schema.Struct({
 });
 export type StoryClusteringSupportOutput =
   typeof storyClusteringSupportOutputSchema.Type;
+
+export const semanticStoryClusteringSupportOutputSchema = Schema.Struct({
+  embedding_model: Schema.String,
+  reranking_model: Schema.NullOr(Schema.String),
+  reranking_supported: Schema.Boolean,
+  article_pair_scores: Schema.Array(
+    Schema.Struct({
+      left_article_id: uuidString,
+      right_article_id: uuidString,
+      embedding_similarity: confidenceNumber,
+      rerank_score: Schema.NullOr(confidenceNumber),
+      final_score: confidenceNumber,
+    }),
+  ),
+  confidence: confidenceNumber,
+});
+export type SemanticStoryClusteringSupportOutput =
+  typeof semanticStoryClusteringSupportOutputSchema.Type;
 
 export const storySummaryOutputSchema = Schema.Struct({
   neutralSummary: Schema.String.check(Schema.isMaxLength(1600)),
@@ -290,6 +331,7 @@ export const aiStructuredOutputSchema = Schema.Union([
   articleExtractionQaOutputSchema,
   claimExtractionOutputSchema,
   storyClusteringSupportOutputSchema,
+  semanticStoryClusteringSupportOutputSchema,
   storySummaryOutputSchema,
   biasContextOutputSchema,
   factualityReliabilitySupportOutputSchema,
@@ -646,6 +688,31 @@ export function looksLikePlaceholderText(value: string) {
   if (letterOrDigitCount < 6) return true;
   if (punctuationCount > letterOrDigitCount) return true;
   return false;
+}
+
+const ARTICLE_TYPES_THAT_FAIL_EXTRACTION = new Set<ArticleType>([
+  "duplicate",
+  "non_article",
+  "satire",
+  "sponsored",
+]);
+
+export function shouldTreatArticleExtractionAsValid(
+  output: ArticleExtractionQaOutput,
+) {
+  if (output.extraction_valid) {
+    return true;
+  }
+
+  if (ARTICLE_TYPES_THAT_FAIL_EXTRACTION.has(output.article_type)) {
+    return false;
+  }
+
+  return (
+    output.title_quality === "valid" &&
+    output.date_quality === "valid" &&
+    output.language_quality === "valid"
+  );
 }
 
 export function storySummaryLooksSuspicious(summary: StorySummaryOutput | StorySummary) {

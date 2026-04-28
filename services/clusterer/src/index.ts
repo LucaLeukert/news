@@ -24,8 +24,11 @@ export type ClusterableArticle = ArticleMetadata & {
   ownershipCategory?: string | null;
   reliabilityBand?: string | null;
   aiEntityKeys?: string[];
+  aiClaimKeys?: string[];
   semanticCuePhrases?: string[];
   semanticFingerprint?: string | null;
+  extractionValid?: boolean;
+  extractionConfidence?: number;
 };
 
 export type StoryCluster = {
@@ -34,7 +37,11 @@ export type StoryCluster = {
   articleScores: Record<string, number>;
 };
 
-const DEFAULT_CLUSTER_THRESHOLD = 0.45;
+export type SemanticPairScoreMap = ReadonlyMap<string, number>;
+
+const DEFAULT_CLUSTER_THRESHOLD = 0.3;
+const AI_SOFT_HIDE_CONFIDENCE = 0.6;
+const TOKEN_PATTERN = /\p{L}[\p{L}\p{N}]*/gu;
 
 const STOP_WORDS = new Set([
   "a",
@@ -70,21 +77,44 @@ function stableUuidFromText(text: string) {
   return `${hex.slice(0, 8)}-0000-4000-8000-${hex}${hex}`.slice(0, 36);
 }
 
+function normalizeClusteringText(value: string) {
+  return value
+    .normalize("NFKD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/white house|weissen haus|weißen haus/gu, " whitehouse ")
+    .replace(/state visit/gu, " statevisit ")
+    .replace(/staatsbesuch(?:es|e|en)?/gu, " statevisit ")
+    .replace(/u\.s\.a?|\busa\b|united states|vereinigten staaten/gu, " usa ")
+    .replace(/britisch(?:e|en|er|es)?/gu, " british ")
+    .replace(/koenig|konig|king/gu, " king ")
+    .replace(/kongress/gu, " congress ");
+}
+
+function tokenizeClusteringText(value: string) {
+  return normalizeClusteringText(value).match(TOKEN_PATTERN) ?? [];
+}
+
+function jaccard(a: ReadonlySet<string>, b: ReadonlySet<string>) {
+  if (a.size === 0 && b.size === 0) return 0;
+  const shared = [...a].filter((token) => b.has(token)).length;
+  return shared / Math.max(new Set([...a, ...b]).size, 1);
+}
+
 function fingerprintTokens(value: string | null) {
   return new Set(
-    (value ?? "")
-      .toLowerCase()
-      .split(/[^a-z0-9]+/)
-      .filter((token) => token.length >= 3),
+    tokenizeClusteringText(value ?? "").filter((token) => token.length >= 3),
   );
+}
+
+export function semanticPairKey(aId: string, bId: string) {
+  return aId < bId ? `${aId}::${bId}` : `${bId}::${aId}`;
 }
 
 export function extractEntityKeysFromTitle(title: string) {
   return [
     ...new Set(
-      title
-        .toLowerCase()
-        .split(/\W+/)
+      tokenizeClusteringText(title)
         .filter((token) => token.length >= 4 && !STOP_WORDS.has(token))
         .slice(0, 12),
     ),
@@ -101,8 +131,9 @@ export function toClusterCandidate(
     entityKeys: [
       ...new Set([
         ...extractEntityKeysFromTitle(article.title),
-        ...(article.aiEntityKeys ?? []),
-        ...(article.semanticCuePhrases ?? []),
+        ...(article.aiEntityKeys ?? []).flatMap(extractEntityKeysFromTitle),
+        ...(article.aiClaimKeys ?? []).flatMap(extractEntityKeysFromTitle),
+        ...(article.semanticCuePhrases ?? []).flatMap(extractEntityKeysFromTitle),
       ]),
     ],
     publishedAt: article.publishedAt,
@@ -110,18 +141,41 @@ export function toClusterCandidate(
   };
 }
 
+export function semanticClusteringTextFor(article: ClusterableArticle) {
+  return [
+    article.title,
+    article.snippet ?? "",
+    article.semanticFingerprint ?? "",
+    ...(article.semanticCuePhrases ?? []),
+    ...(article.aiEntityKeys ?? []),
+    ...(article.aiClaimKeys ?? []),
+  ]
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0)
+    .join("\n");
+}
+
+export function combineClusterScores(
+  lexicalScore: number,
+  semanticScore?: number,
+) {
+  if (semanticScore === undefined) {
+    return lexicalScore;
+  }
+
+  return Number(
+    Math.max(lexicalScore, lexicalScore * 0.4 + semanticScore * 0.6).toFixed(3),
+  );
+}
+
 export function scoreSameStory(a: ClusterCandidate, b: ClusterCandidate) {
   const titleTokensA = new Set(
-    a.title.toLowerCase().split(/\W+/).filter(Boolean),
+    tokenizeClusteringText(a.title).filter(Boolean),
   );
   const titleTokensB = new Set(
-    b.title.toLowerCase().split(/\W+/).filter(Boolean),
+    tokenizeClusteringText(b.title).filter(Boolean),
   );
-  const sharedTitle = [...titleTokensA].filter((token) =>
-    titleTokensB.has(token),
-  ).length;
-  const titleScore =
-    sharedTitle / Math.max(titleTokensA.size, titleTokensB.size, 1);
+  const titleScore = jaccard(titleTokensA, titleTokensB);
   const sharedEntities = a.entityKeys.filter((entity) =>
     b.entityKeys.includes(entity),
   ).length;
@@ -129,13 +183,9 @@ export function scoreSameStory(a: ClusterCandidate, b: ClusterCandidate) {
     sharedEntities / Math.max(a.entityKeys.length, b.entityKeys.length, 1);
   const fingerprintTokensA = fingerprintTokens(a.semanticFingerprint);
   const fingerprintTokensB = fingerprintTokens(b.semanticFingerprint);
-  const sharedFingerprintTokens = [...fingerprintTokensA].filter((token) =>
-    fingerprintTokensB.has(token),
-  ).length;
   const fingerprintScore =
     fingerprintTokensA.size > 0 && fingerprintTokensB.size > 0
-      ? sharedFingerprintTokens /
-        Math.max(fingerprintTokensA.size, fingerprintTokensB.size, 1)
+      ? jaccard(fingerprintTokensA, fingerprintTokensB)
       : 0;
   const timeScore =
     a.publishedAt && b.publishedAt
@@ -146,13 +196,20 @@ export function scoreSameStory(a: ClusterCandidate, b: ClusterCandidate) {
               86_400_000,
         )
       : 0.5;
+  const sharedEntityBoost =
+    timeScore >= 0.8 && sharedEntities >= 4
+      ? 0.2
+      : timeScore >= 0.8 && sharedEntities >= 3
+        ? 0.1
+        : 0;
 
   return Number(
     (
       titleScore * 0.2 +
       entityScore * 0.25 +
-      fingerprintScore * 0.4 +
-      timeScore * 0.15
+      fingerprintScore * 0.45 +
+      timeScore * 0.1 +
+      sharedEntityBoost
     ).toFixed(3),
   );
 }
@@ -246,6 +303,20 @@ function canProceedToClustering(state: CrawlValidationState) {
   return state === "rss_verified";
 }
 
+function canUseArticleForPublicClustering(article: ClusterableArticle) {
+  if (!canProceedToClustering(article.crawlStatus)) return false;
+  if (
+    article.extractionValid === false &&
+    (article.extractionConfidence ?? 1) >= AI_SOFT_HIDE_CONFIDENCE
+  ) {
+    return false;
+  }
+  if (["non_article", "duplicate", "sponsored", "satire"].includes(article.articleType)) {
+    return false;
+  }
+  return true;
+}
+
 function makeStoryCluster(articles: ClusterableArticle[]): StoryCluster {
   const title = chooseStoryTitle(articles);
   const firstSeenAt = earliestIso(articles);
@@ -276,7 +347,10 @@ function makeStoryCluster(articles: ClusterableArticle[]): StoryCluster {
 
 export function clusterArticles(
   input: readonly ClusterableArticle[],
-  options: { threshold?: number } = {},
+  options: {
+    threshold?: number;
+    semanticPairScores?: SemanticPairScoreMap;
+  } = {},
 ) {
   const threshold = options.threshold ?? DEFAULT_CLUSTER_THRESHOLD;
   const clusters: Array<{
@@ -286,7 +360,7 @@ export function clusterArticles(
   }> = [];
 
   for (const article of input) {
-    if (!canProceedToClustering(article.crawlStatus)) continue;
+    if (!canUseArticleForPublicClustering(article)) continue;
     const candidate = toClusterCandidate(article);
     let best:
       | {
@@ -296,7 +370,12 @@ export function clusterArticles(
       | undefined;
 
     for (const cluster of clusters) {
-      const score = scoreSameStory(cluster.anchor, candidate);
+      const score = combineClusterScores(
+        scoreSameStory(cluster.anchor, candidate),
+        options.semanticPairScores?.get(
+          semanticPairKey(cluster.anchor.id, candidate.id),
+        ),
+      );
       if (score >= threshold && (!best || score > best.score)) {
         best = { cluster, score };
       }

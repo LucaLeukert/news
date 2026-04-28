@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { clusterArticles, scoreSameStory } from "../services/clusterer/src";
+import {
+  clusterArticles,
+  scoreSameStory,
+  semanticPairKey,
+} from "../services/clusterer/src";
 
 describe("story clustering score", () => {
   it("scores related event candidates higher than unrelated ones", () => {
@@ -126,6 +130,31 @@ describe("clusterArticles", () => {
         },
       ),
     ]);
+
+    expect(clusters).toHaveLength(1);
+    expect(clusters[0]?.articles).toHaveLength(2);
+  });
+
+  it("uses semantic pair scores to merge low-overlap rewrites", () => {
+    const firstId = "00000000-0000-4000-8000-000000000401";
+    const secondId = "00000000-0000-4000-8000-000000000402";
+    const clusters = clusterArticles(
+      [
+        article(firstId, "King Charles III expected to address US Congress", {
+          semanticFingerprint: "Charles III state visit to Washington",
+        }),
+        article(
+          secondId,
+          "Trump welcomes British monarch during White House visit",
+          {
+            semanticFingerprint: "British king meets US president in Washington",
+          },
+        ),
+      ],
+      {
+        semanticPairScores: new Map([[semanticPairKey(firstId, secondId), 0.76]]),
+      },
+    );
 
     expect(clusters).toHaveLength(1);
     expect(clusters[0]?.articles).toHaveLength(2);

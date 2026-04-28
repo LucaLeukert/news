@@ -1,4 +1,10 @@
-import { aiJobTypesForModel, canPublishPublicAiOutput, canUseInAggregateLabels } from "@news/ai";
+import {
+  aiJobTypesForModel,
+  canPublishPublicAiOutput,
+  canUseInAggregateLabels,
+  type AiModelPolicy,
+  modelPolicy,
+} from "@news/ai";
 import { api, toStoryDetailProjection, toStoryProjection } from "@news/convex";
 import {
   aiJobs,
@@ -17,11 +23,13 @@ import {
   type FactualityReliabilitySupportOutput,
   type OwnershipExtractionSupportOutput,
   type SafetyComplianceOutput,
+  type StorySummary,
   articleExtractionQaJobPayloadSchema,
   claimExtractionJobPayloadSchema,
   decodeUnknownSync,
   neutralStorySummaryJobPayloadSchema,
   safetyComplianceJobPayloadSchema,
+  shouldTreatArticleExtractionAsValid,
   sourceAnalysisJobPayloadSchema,
   storyClusteringSupportJobPayloadSchema,
   type AiJobType,
@@ -30,7 +38,7 @@ import {
   type SafetyComplianceJobPayload,
   type StorySummaryOutput,
 } from "@news/types";
-import { and, asc, desc, eq, inArray, lt, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { ConvexHttpClient } from "convex/browser";
 import { Data, DateTime, Effect } from "effect";
 import { makePostgresRepository } from "./repository";
@@ -238,6 +246,7 @@ export const leaseAiJobFromCanonicalStore = (
     readonly nodeId: string;
     readonly model?: string;
   },
+  policy: AiModelPolicy = modelPolicy,
 ): Effect.Effect<LeasedAiJob | null, CanonicalStoreError> =>
   Effect.gen(function* () {
     const db = createDb(databaseUrl);
@@ -248,40 +257,69 @@ export const leaseAiJobFromCanonicalStore = (
     );
 
     const allowedJobTypes = input.model
-      ? aiJobTypesForModel(input.model as never)
+      ? aiJobTypesForModel(input.model, policy)
       : null;
-    const candidates = yield* tryCanonical("Failed to lease AI job", () =>
-      db
-        .select()
-        .from(aiJobs)
-        .where(
-          and(
-            allowedJobTypes ? inArray(aiJobs.type, allowedJobTypes) : undefined,
-            or(
-              eq(aiJobs.status, "pending"),
-              and(eq(aiJobs.status, "leased"), lt(aiJobs.leaseExpiresAt, now)),
+    let job: typeof aiJobs.$inferSelect | undefined;
+
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const candidates = yield* tryCanonical("Failed to lease AI job", () =>
+        db
+          .select()
+          .from(aiJobs)
+          .where(
+            and(
+              allowedJobTypes
+                ? inArray(aiJobs.type, allowedJobTypes)
+                : undefined,
+              or(
+                eq(aiJobs.status, "pending"),
+                and(eq(aiJobs.status, "leased"), lt(aiJobs.leaseExpiresAt, now)),
+              ),
             ),
-          ),
-        )
-        .orderBy(asc(aiJobs.priority), asc(aiJobs.createdAt))
-        .limit(1),
-    );
+          )
+          .orderBy(asc(aiJobs.priority), asc(aiJobs.createdAt))
+          .limit(1),
+      );
 
-    const job = candidates[0];
+      const candidate = candidates[0];
+      if (!candidate) {
+        return null;
+      }
+
+      const leasedRows = yield* tryCanonical(
+        `Failed to update lease for AI job ${candidate.id}`,
+        () =>
+          db
+            .update(aiJobs)
+            .set({
+              status: "leased",
+              leasedBy: input.nodeId,
+              leaseExpiresAt,
+              attempts: candidate.attempts + 1,
+              updatedAt: now,
+            })
+            .where(
+              and(
+                eq(aiJobs.id, candidate.id),
+                or(
+                  eq(aiJobs.status, "pending"),
+                  and(
+                    eq(aiJobs.status, "leased"),
+                    lt(aiJobs.leaseExpiresAt, now),
+                  ),
+                ),
+              ),
+            )
+            .returning(),
+      );
+
+      job = leasedRows[0];
+      if (job) {
+        break;
+      }
+    }
+
     if (!job) return null;
-
-    yield* tryCanonical(`Failed to update lease for AI job ${job.id}`, () =>
-      db
-        .update(aiJobs)
-        .set({
-          status: "leased",
-          leasedBy: input.nodeId,
-          leaseExpiresAt,
-          attempts: job.attempts + 1,
-          updatedAt: now,
-        })
-        .where(eq(aiJobs.id, job.id)),
-    );
 
     switch (job.type) {
       case "article_extraction_qa":
@@ -308,6 +346,8 @@ export const leaseAiJobFromCanonicalStore = (
           inputArtifactIds: job.inputArtifactIds,
           leaseExpiresAt: leaseExpiresAt.toISOString(),
         };
+      case "semantic_story_clustering_support":
+        return null;
       case "neutral_story_summary":
         return {
           id: job.id,
@@ -432,8 +472,14 @@ export const persistAiResultToCanonicalStore = (
               .update(articles)
               .set({
                 type: structuredOutput.article_type,
-                crawlStatus: structuredOutput.extraction_valid
-                  ? undefined
+                crawlStatus: shouldTreatArticleExtractionAsValid(
+                  structuredOutput,
+                )
+                  ? sql`case
+                      when ${articles.crawlStatus} = 'extraction_failed'
+                        then 'rss_verified'::crawl_validation_state
+                      else ${articles.crawlStatus}
+                    end`
                   : "extraction_failed",
               })
               .where(eq(articles.id, payload.article.articleId)),
@@ -484,6 +530,12 @@ export const persistAiResultToCanonicalStore = (
           rebuildStories: true,
           queueProjectionSync: false,
         };
+      case "semantic_story_clustering_support":
+        return {
+          jobType: job.type,
+          rebuildStories: false,
+          queueProjectionSync: false,
+        };
       case "bias_context_classification":
       case "factuality_reliability_support":
       case "ownership_extraction_support": {
@@ -495,7 +547,7 @@ export const persistAiResultToCanonicalStore = (
               .select()
               .from(sourceRatings)
               .where(eq(sourceRatings.sourceId, payload.sourceId))
-              .orderBy(desc(sourceRatings.publishedAt), desc(sourceRatings.createdAt))
+              .orderBy(desc(sourceRatings.createdAt))
               .limit(1),
         );
         const publishable = canUseInAggregateLabels(result.confidence);
@@ -561,36 +613,18 @@ export const persistAiResultToCanonicalStore = (
             queueProjectionSync: false,
           };
         }
-        if (canPublishPublicAiOutput(result.confidence)) {
-          yield* tryCanonical(
-            `Failed to update story summary for ${payload.storyId}`,
-            () =>
-              db
-                .update(stories)
-                .set({
-                  summary: {
-                    neutralSummary: structuredOutput.neutralSummary,
-                    agreed: structuredOutput.agreed,
-                    differs: structuredOutput.differs,
-                    contestedOrUnverified: structuredOutput.contestedOrUnverified,
-                    confidence: result.confidence,
-                    lastUpdatedAt: result.created_at,
-                  },
-                  lastSeenAt: createdAt,
-                })
-                .where(eq(stories.id, payload.storyId)),
-          );
-        }
         return {
           jobType: job.type,
           rebuildStories: false,
           queueProjectionSync: false,
-          safetyJobPayload: {
-            storyId: payload.storyId,
-            storyTitle: payload.storyTitle,
-            summary: structuredOutput,
-            articles: payload.articles,
-          },
+          safetyJobPayload: canPublishPublicAiOutput(result.confidence)
+            ? {
+                storyId: payload.storyId,
+                storyTitle: payload.storyTitle,
+                summary: structuredOutput,
+                articles: payload.articles,
+              }
+            : undefined,
         };
       }
       case "safety_compliance_check": {
@@ -602,7 +636,30 @@ export const persistAiResultToCanonicalStore = (
             queueProjectionSync: true,
           };
         }
-        if (!(structuredOutput.safe_to_publish && canPublishPublicAiOutput(result.confidence))) {
+        if (
+          structuredOutput.safe_to_publish &&
+          canPublishPublicAiOutput(result.confidence)
+        ) {
+          const summary: StorySummary = {
+            neutralSummary: payload.summary.neutralSummary,
+            agreed: payload.summary.agreed,
+            differs: payload.summary.differs,
+            contestedOrUnverified: payload.summary.contestedOrUnverified,
+            confidence: payload.summary.confidence,
+            lastUpdatedAt: result.created_at,
+          };
+          yield* tryCanonical(
+            `Failed to publish approved story summary for ${payload.storyId}`,
+            () =>
+              db
+                .update(stories)
+                .set({
+                  summary,
+                  lastSeenAt: createdAt,
+                })
+                .where(eq(stories.id, payload.storyId)),
+          );
+        } else {
           yield* tryCanonical(
             `Failed to clear unsafe story summary for ${payload.storyId}`,
             () =>

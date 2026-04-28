@@ -4,6 +4,7 @@ import { Effect } from "effect";
 import { env } from "../env";
 import {
   enqueueCrawlAction,
+  reingestFailedVerificationAction,
   resolveUrlAction,
   syncProjectionAction,
 } from "./actions";
@@ -83,6 +84,77 @@ export default async function AdminHome(props: {
               <h3>Projection Sync</h3>
               <p>Push canonical public stories back into Convex.</p>
               <button type="submit">Queue Sync</button>
+            </form>
+            <form
+              action={reingestFailedVerificationAction}
+              className="control-card control-card-wide"
+            >
+              <h3>Reingest Failed Verification</h3>
+              <p>
+                Re-fetch failed verification articles, update crawl status,
+                requeue AI jobs, and rebuild stories.
+              </p>
+              <label className="field">
+                <span>Source Domain</span>
+                <input
+                  type="text"
+                  name="sourceDomain"
+                  placeholder="zdfheute.de"
+                />
+              </label>
+              <label className="field">
+                <span>Limit</span>
+                <input type="number" name="limit" min="1" defaultValue="100" />
+              </label>
+              <fieldset className="field">
+                <legend>Statuses</legend>
+                <label>
+                  <input
+                    type="checkbox"
+                    name="statuses"
+                    value="rss_mismatch_title"
+                    defaultChecked
+                  />
+                  RSS title mismatch
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    name="statuses"
+                    value="rss_mismatch_date"
+                    defaultChecked
+                  />
+                  RSS date mismatch
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    name="statuses"
+                    value="canonical_failed"
+                  />
+                  Canonical fetch failed
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    name="statuses"
+                    value="extraction_failed"
+                  />
+                  Extraction failed
+                </label>
+              </fieldset>
+              <fieldset className="field">
+                <legend>Manual Override</legend>
+                <label>
+                  <input
+                    type="checkbox"
+                    name="overrideTitleMismatches"
+                    value="on"
+                  />
+                  Promote persistent title mismatches to verified after reingest
+                </label>
+              </fieldset>
+              <button type="submit">Reingest Failed Articles</button>
             </form>
             <form action={resolveUrlAction} className="control-card control-card-wide">
               <h3>Resolve URL</h3>

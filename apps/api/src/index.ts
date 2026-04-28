@@ -5,7 +5,7 @@ import {
   NewsRpcs,
   makeAppLayer,
 } from "@news/platform";
-import { loadServerEnv } from "@news/env";
+import { type ServerEnv, loadServerEnv } from "@news/env";
 import {
   type AiResultEnvelope,
   type CrawlEnqueueRequest,
@@ -16,6 +16,7 @@ import {
   storyListQuerySchema,
   storySchema,
 } from "@news/types";
+import { StructuredAiLive, resolveModelPolicy } from "@news/ai";
 import { Context, Data, DateTime, Effect, Layer, Option } from "effect";
 import * as Headers from "effect/unstable/http/Headers";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
@@ -45,8 +46,24 @@ export interface Env {
   SYNC_QUEUE?: Queue;
   CRAWL_ARTIFACTS?: R2Bucket;
   CLERK_SECRET_KEY?: string;
-  LOCAL_MODEL_BASE_URL?: string;
-  LOCAL_MODEL_NAME?: string;
+  AI_HOST_PROFILE?: string;
+  AI_HOST_REAL_BASE_URL?: string;
+  AI_HOST_LOCAL_BASE_URL?: string;
+  AI_HOST_REAL_DEFAULT_MODEL?: string;
+  AI_HOST_LOCAL_DEFAULT_MODEL?: string;
+  AI_MODEL_POLICY_PROFILE?: string;
+  AI_MODEL_REAL_EXTRACTION?: string;
+  AI_MODEL_REAL_CLASSIFICATION?: string;
+  AI_MODEL_REAL_EMBEDDINGS?: string;
+  AI_MODEL_REAL_RERANKING?: string;
+  AI_MODEL_REAL_EDITORIAL_REVIEW?: string;
+  AI_MODEL_REAL_PUBLIC_SUMMARY?: string;
+  AI_MODEL_LOCAL_TEST_EXTRACTION?: string;
+  AI_MODEL_LOCAL_TEST_CLASSIFICATION?: string;
+  AI_MODEL_LOCAL_TEST_EMBEDDINGS?: string;
+  AI_MODEL_LOCAL_TEST_RERANKING?: string;
+  AI_MODEL_LOCAL_TEST_EDITORIAL_REVIEW?: string;
+  AI_MODEL_LOCAL_TEST_PUBLIC_SUMMARY?: string;
   INTERNAL_SERVICE_TOKEN?: string;
   NEXT_PUBLIC_CONVEX_URL?: string;
 }
@@ -285,9 +302,13 @@ const makeRpcHandlersLayer = (env: Env) =>
               );
             }
             if (!env.DATABASE_URL) return null;
+            const activeModelPolicy = resolveModelPolicy(
+              yield* loadServerEnv(runtimeEnv(env)),
+            );
             return yield* leaseAiJobFromCanonicalStore(
               env.DATABASE_URL,
               _payload,
+              activeModelPolicy,
             ).pipe(Effect.mapError(toRpcError));
           }).pipe(Effect.mapError(toRpcError)),
         FailAiJob: ({ jobId, error }, options) =>
@@ -449,16 +470,60 @@ const makeHttpRoutesLayer = (env: Env) =>
     ),
   );
 
+const makeRpcRoutesLayer = (env: Env) =>
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const rpcHandler = yield* RpcServer.toHttpEffect(NewsRpcs, {
+        disableTracing: true,
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            makeRpcHandlersLayer(env),
+            RpcSerialization.layerJson,
+          ),
+        ),
+      );
+
+      return Layer.mergeAll(
+        HttpRouter.add("POST", "/rpc", rpcHandler),
+      );
+    }),
+  );
+
 function runtimeEnv(env: Env) {
   return {
     DATABASE_URL: env.DATABASE_URL,
     CLERK_SECRET_KEY: env.CLERK_SECRET_KEY,
-    LOCAL_MODEL_BASE_URL: env.LOCAL_MODEL_BASE_URL,
-    LOCAL_MODEL_NAME: env.LOCAL_MODEL_NAME,
+    AI_HOST_PROFILE: env.AI_HOST_PROFILE,
+    AI_HOST_REAL_BASE_URL: env.AI_HOST_REAL_BASE_URL,
+    AI_HOST_LOCAL_BASE_URL: env.AI_HOST_LOCAL_BASE_URL,
+    AI_HOST_REAL_DEFAULT_MODEL: env.AI_HOST_REAL_DEFAULT_MODEL,
+    AI_HOST_LOCAL_DEFAULT_MODEL: env.AI_HOST_LOCAL_DEFAULT_MODEL,
+    AI_MODEL_POLICY_PROFILE: env.AI_MODEL_POLICY_PROFILE,
+    AI_MODEL_REAL_EXTRACTION: env.AI_MODEL_REAL_EXTRACTION,
+    AI_MODEL_REAL_CLASSIFICATION: env.AI_MODEL_REAL_CLASSIFICATION,
+    AI_MODEL_REAL_EMBEDDINGS: env.AI_MODEL_REAL_EMBEDDINGS,
+    AI_MODEL_REAL_RERANKING: env.AI_MODEL_REAL_RERANKING,
+    AI_MODEL_REAL_EDITORIAL_REVIEW: env.AI_MODEL_REAL_EDITORIAL_REVIEW,
+    AI_MODEL_REAL_PUBLIC_SUMMARY: env.AI_MODEL_REAL_PUBLIC_SUMMARY,
+    AI_MODEL_LOCAL_TEST_EXTRACTION: env.AI_MODEL_LOCAL_TEST_EXTRACTION,
+    AI_MODEL_LOCAL_TEST_CLASSIFICATION: env.AI_MODEL_LOCAL_TEST_CLASSIFICATION,
+    AI_MODEL_LOCAL_TEST_EMBEDDINGS: env.AI_MODEL_LOCAL_TEST_EMBEDDINGS,
+    AI_MODEL_LOCAL_TEST_RERANKING: env.AI_MODEL_LOCAL_TEST_RERANKING,
+    AI_MODEL_LOCAL_TEST_EDITORIAL_REVIEW: env.AI_MODEL_LOCAL_TEST_EDITORIAL_REVIEW,
+    AI_MODEL_LOCAL_TEST_PUBLIC_SUMMARY: env.AI_MODEL_LOCAL_TEST_PUBLIC_SUMMARY,
     NEXT_PUBLIC_CONVEX_URL: env.NEXT_PUBLIC_CONVEX_URL,
     INTERNAL_SERVICE_TOKEN: env.INTERNAL_SERVICE_TOKEN,
   };
 }
+
+const makeRuntimeAppLayer = (env: ServerEnv) => {
+  const appLayer = makeAppLayer(env);
+  const structuredAiLayer = StructuredAiLive(resolveModelPolicy(env)).pipe(
+    Layer.provide(appLayer),
+  );
+  return Layer.mergeAll(appLayer, structuredAiLayer);
+};
 
 type CachedHandler = (
   request: Request,
@@ -485,16 +550,11 @@ const getHandler = (env: Env) => {
       const httpRoutesLayer = makeHttpRoutesLayer(env).pipe(
         Layer.provide(repositoryLayer),
       );
-      const rpcLayer = RpcServer.layerHttp({
-        group: NewsRpcs,
-        path: "/rpc",
-        protocol: "http",
-      }).pipe(
-        Layer.provide(makeRpcHandlersLayer(env).pipe(Layer.provide(repositoryLayer))),
-        Layer.provide(RpcSerialization.layerJson),
+      const rpcRoutesLayer = makeRpcRoutesLayer(env).pipe(
+        Layer.provide(repositoryLayer),
       );
-      const appLayer = Layer.mergeAll(httpRoutesLayer, rpcLayer).pipe(
-        Layer.provideMerge(makeAppLayer(parsedEnv)),
+      const appLayer = Layer.mergeAll(httpRoutesLayer, rpcRoutesLayer).pipe(
+        Layer.provideMerge(makeRuntimeAppLayer(parsedEnv)),
       );
 
       return HttpRouter.toWebHandler(appLayer, {
@@ -533,80 +593,83 @@ export default {
       .catch(toErrorResponse);
   },
   queue(batch: MessageBatch<WorkerQueueMessage>, env: Env) {
-    const parsedEnv = runtimeEnv(env);
     return Effect.runPromise(
-      Effect.forEach(batch.messages, (message) => {
-        const body = message.body;
-
-        if (body.type === "ai_result") {
-          if (!env.DATABASE_URL) {
-            return Effect.fail(
+      Effect.gen(function* () {
+        const parsedEnv = yield* loadServerEnv(runtimeEnv(env)).pipe(
+          Effect.mapError(
+            (cause) =>
               new ApiRequestError({
-                message: "DATABASE_URL is required for AI result handling",
+                message: "Failed to load runtime env for queue processing",
+                cause,
               }),
-            );
-          }
+          ),
+        );
 
-          return Effect.gen(function* () {
-            const outcome = yield* persistAiResultToCanonicalStore(
-              env.DATABASE_URL as string,
-              body.result,
-            );
-            if (outcome.rebuildStories) {
-              yield* rebuildStoriesAndQueueAiJobs(env.DATABASE_URL as string, {
-                includeClusteringSupportJobs: false,
-              });
-            }
-            if (outcome.safetyJobPayload) {
-              yield* enqueueSafetyComplianceJob(
-                env.DATABASE_URL as string,
-                outcome.safetyJobPayload,
+        return yield* Effect.forEach(batch.messages, (message) => {
+          const body = message.body;
+
+          if (body.type === "ai_result") {
+            if (!env.DATABASE_URL) {
+              return Effect.fail(
+                new ApiRequestError({
+                  message: "DATABASE_URL is required for AI result handling",
+                }),
               );
             }
-            if (outcome.queueProjectionSync) {
-              const queuedAt = yield* nowIso;
-              yield* enqueue(env.SYNC_QUEUE, {
-                type: "sync_public_story_projections",
-                reason: "ai_result",
-                jobId: body.result.job_id,
-                queuedAt,
-              });
-            }
-          });
-        }
 
-        if (body.type === "sync_public_story_projections") {
-          return Effect.gen(function* () {
-            const loadedEnv = yield* loadServerEnv(parsedEnv).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new ApiRequestError({
-                    message: "Failed to load runtime env for Convex sync",
-                    cause,
-                  }),
-              ),
-            );
-            if (!loadedEnv.DATABASE_URL) {
-              return yield* new ApiRequestError({
-                message: "DATABASE_URL is required for Convex sync",
-              });
-            }
-            if (!loadedEnv.NEXT_PUBLIC_CONVEX_URL) {
-              return yield* new ApiRequestError({
-                message: "NEXT_PUBLIC_CONVEX_URL is required for Convex sync",
-              });
-            }
-
-            yield* syncCanonicalStoriesToConvex({
-              databaseUrl: loadedEnv.DATABASE_URL,
-              convexUrl: loadedEnv.NEXT_PUBLIC_CONVEX_URL,
-              serviceToken: loadedEnv.INTERNAL_SERVICE_TOKEN,
+            return Effect.gen(function* () {
+              const outcome = yield* persistAiResultToCanonicalStore(
+                env.DATABASE_URL as string,
+                body.result,
+              );
+              if (outcome.rebuildStories) {
+                yield* rebuildStoriesAndQueueAiJobs(env.DATABASE_URL as string, {
+                  aiModelPolicy: resolveModelPolicy(parsedEnv),
+                  includeClusteringSupportJobs: false,
+                });
+              }
+              if (outcome.safetyJobPayload) {
+                yield* enqueueSafetyComplianceJob(
+                  env.DATABASE_URL as string,
+                  outcome.safetyJobPayload,
+                );
+              }
+              if (outcome.queueProjectionSync) {
+                const queuedAt = yield* nowIso;
+                yield* enqueue(env.SYNC_QUEUE, {
+                  type: "sync_public_story_projections",
+                  reason: "ai_result",
+                  jobId: body.result.job_id,
+                  queuedAt,
+                });
+              }
             });
-            return;
-          });
-        }
+          }
 
-        return Effect.void;
+          if (body.type === "sync_public_story_projections") {
+            return Effect.gen(function* () {
+              if (!parsedEnv.DATABASE_URL) {
+                return yield* new ApiRequestError({
+                  message: "DATABASE_URL is required for Convex sync",
+                });
+              }
+              if (!parsedEnv.NEXT_PUBLIC_CONVEX_URL) {
+                return yield* new ApiRequestError({
+                  message: "NEXT_PUBLIC_CONVEX_URL is required for Convex sync",
+                });
+              }
+
+              yield* syncCanonicalStoriesToConvex({
+                databaseUrl: parsedEnv.DATABASE_URL,
+                convexUrl: parsedEnv.NEXT_PUBLIC_CONVEX_URL,
+                serviceToken: parsedEnv.INTERNAL_SERVICE_TOKEN,
+              });
+              return;
+            });
+          }
+
+          return Effect.void;
+        }).pipe(Effect.provide(makeRuntimeAppLayer(parsedEnv)));
       }),
     );
   },

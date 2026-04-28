@@ -43,20 +43,48 @@ export class AiGateway extends Context.Service<AiGateway, AiGatewayShape>()(
   "@news/platform/AiGateway",
 ) {}
 
+const resolveAiHostBaseUrl = (
+  env: Pick<
+    ServerEnv,
+    "AI_HOST_PROFILE" | "AI_HOST_REAL_BASE_URL" | "AI_HOST_LOCAL_BASE_URL"
+  >,
+) =>
+  env.AI_HOST_PROFILE === "real"
+    ? env.AI_HOST_REAL_BASE_URL
+    : env.AI_HOST_LOCAL_BASE_URL;
+
+const resolveDefaultModel = (
+  env: Pick<
+    ServerEnv,
+    "AI_HOST_PROFILE" | "AI_HOST_REAL_DEFAULT_MODEL" | "AI_HOST_LOCAL_DEFAULT_MODEL"
+  >,
+) =>
+  env.AI_HOST_PROFILE === "real"
+    ? env.AI_HOST_REAL_DEFAULT_MODEL
+    : env.AI_HOST_LOCAL_DEFAULT_MODEL;
+
 export const makeAiGateway = Effect.fn(function* (
-  env: Pick<ServerEnv, "LOCAL_MODEL_BASE_URL" | "LOCAL_MODEL_NAME">,
+  env: Pick<
+    ServerEnv,
+    | "AI_HOST_PROFILE"
+    | "AI_HOST_REAL_BASE_URL"
+    | "AI_HOST_LOCAL_BASE_URL"
+    | "AI_HOST_REAL_DEFAULT_MODEL"
+    | "AI_HOST_LOCAL_DEFAULT_MODEL"
+  >,
 ): Effect.fn.Return<AiGatewayShape, never, MetricsService> {
   const metrics = yield* MetricsService;
-  const lmstudio = createOpenAICompatible({
-    name: "lmstudio",
-    baseURL: env.LOCAL_MODEL_BASE_URL,
+  const defaultModel = resolveDefaultModel(env);
+  const aiHost = createOpenAICompatible({
+    name: env.AI_HOST_PROFILE,
+    baseURL: resolveAiHostBaseUrl(env),
     supportsStructuredOutputs: true,
   });
 
   return {
     generateText: ({
       prompt,
-      model = env.LOCAL_MODEL_NAME,
+      model = defaultModel,
       maxRetries = 0,
     }) => {
       return Effect.gen(function* () {
@@ -64,7 +92,7 @@ export const makeAiGateway = Effect.fn(function* (
         return yield* Effect.tryPromise({
           try: () =>
             generateText({
-              model: lmstudio(model),
+              model: aiHost(model),
               prompt,
               maxRetries,
             }).then(({ text }) => text),
@@ -103,7 +131,7 @@ export const makeAiGateway = Effect.fn(function* (
     generateObject: <T extends z.ZodTypeAny>({
       prompt,
       schema,
-      model = env.LOCAL_MODEL_NAME,
+      model = defaultModel,
       maxRetries = 0,
     }: {
       readonly prompt: string;
@@ -116,7 +144,7 @@ export const makeAiGateway = Effect.fn(function* (
         return yield* Effect.tryPromise({
           try: () =>
             generateText({
-              model: lmstudio(model),
+              model: aiHost(model),
               output: Output.object({ schema }),
               prompt,
               maxRetries,
@@ -151,13 +179,13 @@ export const makeAiGateway = Effect.fn(function* (
         );
       });
     },
-    embedDocuments: ({ texts, model = env.LOCAL_MODEL_NAME, maxRetries = 0 }) =>
+    embedDocuments: ({ texts, model = defaultModel, maxRetries = 0 }) =>
       Effect.gen(function* () {
         const started = yield* Clock.currentTimeMillis;
         return yield* Effect.tryPromise({
           try: () =>
             embedMany({
-              model: lmstudio.embeddingModel(model),
+              model: aiHost.embeddingModel(model),
               values: [...texts],
               maxRetries,
             }).then(({ embeddings }) => embeddings),
@@ -190,12 +218,12 @@ export const makeAiGateway = Effect.fn(function* (
       query,
       documents,
       topN,
-      model = env.LOCAL_MODEL_NAME,
+      model = defaultModel,
       maxRetries = 0,
     }) =>
       Effect.gen(function* () {
         const started = yield* Clock.currentTimeMillis;
-        const rerankingModelFactory = lmstudio.rerankingModel;
+        const rerankingModelFactory = aiHost.rerankingModel;
         if (!rerankingModelFactory) {
           return yield* new AiGatewayError({
             message: "Configured provider does not support reranking models",
@@ -240,9 +268,23 @@ export const makeAiGateway = Effect.fn(function* (
 });
 
 export const AiGatewayLayer = (
-  env: Pick<ServerEnv, "LOCAL_MODEL_BASE_URL" | "LOCAL_MODEL_NAME">,
+  env: Pick<
+    ServerEnv,
+    | "AI_HOST_PROFILE"
+    | "AI_HOST_REAL_BASE_URL"
+    | "AI_HOST_LOCAL_BASE_URL"
+    | "AI_HOST_REAL_DEFAULT_MODEL"
+    | "AI_HOST_LOCAL_DEFAULT_MODEL"
+  >,
 ) => Layer.effect(AiGateway, makeAiGateway(env));
 
 export const AiGatewayLive = (
-  env: Pick<ServerEnv, "LOCAL_MODEL_BASE_URL" | "LOCAL_MODEL_NAME">,
+  env: Pick<
+    ServerEnv,
+    | "AI_HOST_PROFILE"
+    | "AI_HOST_REAL_BASE_URL"
+    | "AI_HOST_LOCAL_BASE_URL"
+    | "AI_HOST_REAL_DEFAULT_MODEL"
+    | "AI_HOST_LOCAL_DEFAULT_MODEL"
+  >,
 ) => AiGatewayLayer(env).pipe(Layer.provide(MetricsLive));

@@ -21,6 +21,7 @@
     "api:dev:lan": "bun --filter @news/api dev:lan",
     "ai:runner": "bun --filter @news/ai-runner dev",
     "crawler:seed-and-ingest": "bun --filter @news/crawler dev seed-and-ingest",
+    "crawler:reingest-failed-verification": "bun --filter @news/crawler dev reingest-failed-verification",
     "remote:ai:sync": "bash ./scripts/sync-remote-ai-runner.sh",
     "remote:ai:start": "bash ./scripts/start-remote-ai-runner.sh",
     "remote:ai:start:detached": "bash ./scripts/start-remote-ai-runner-detached.sh",

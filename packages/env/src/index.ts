@@ -20,6 +20,11 @@ const localDatabaseUrlSchema = databaseUrlSchema.default(
   "postgres://postgres:postgres@localhost:5432/news",
 );
 
+const aiHostProfileSchema = z.enum(["real", "local"]).default("local");
+const aiModelPolicyProfileSchema = z
+  .enum(["real", "local_test"])
+  .default("local_test");
+
 export const serverOnlyEnvSchema = {
   NODE_ENV: nodeEnvSchema,
   DATABASE_URL: databaseUrlSchema.optional(),
@@ -35,8 +40,26 @@ export const serverOnlyEnvSchema = {
   CLERK_SECRET_KEY: z.string().optional(),
   CLERK_WEBHOOK_SECRET: z.string().optional(),
   CLERK_PRICE_ID_PRO: z.string().optional(),
-  LOCAL_MODEL_BASE_URL: z.string().url().default("http://localhost:1234/v1"),
-  LOCAL_MODEL_NAME: z.string().default("gpt-oss-20b"),
+  AI_HOST_PROFILE: aiHostProfileSchema,
+  AI_HOST_REAL_BASE_URL: z.string().url().default("http://127.0.0.1:1234/v1"),
+  AI_HOST_LOCAL_BASE_URL: z.string().url().default("http://localhost:11434/v1"),
+  AI_HOST_REAL_DEFAULT_MODEL: z.string().default("openai/gpt-oss-20b"),
+  AI_HOST_LOCAL_DEFAULT_MODEL: z.string().default("gemma3:1b"),
+  AI_MODEL_POLICY_PROFILE: aiModelPolicyProfileSchema,
+  AI_MODEL_REAL_EXTRACTION: z.string().default("google/gemma-4-e4b"),
+  AI_MODEL_REAL_CLASSIFICATION: z.string().default("google/gemma-4-e4b"),
+  AI_MODEL_REAL_EMBEDDINGS: z
+    .string()
+    .default("text-embedding-qwen3-embedding-0.6b"),
+  AI_MODEL_REAL_RERANKING: z.string().default("qwen3-reranker-0.6b"),
+  AI_MODEL_REAL_EDITORIAL_REVIEW: z.string().default("google/gemma-4-e4b"),
+  AI_MODEL_REAL_PUBLIC_SUMMARY: z.string().default("google/gemma-4-e4b"),
+  AI_MODEL_LOCAL_TEST_EXTRACTION: z.string().default("gemma3:1b"),
+  AI_MODEL_LOCAL_TEST_CLASSIFICATION: z.string().default("gemma3:1b"),
+  AI_MODEL_LOCAL_TEST_EMBEDDINGS: z.string().default("gemma3:1b"),
+  AI_MODEL_LOCAL_TEST_RERANKING: z.string().default("gemma3:1b"),
+  AI_MODEL_LOCAL_TEST_EDITORIAL_REVIEW: z.string().default("gemma3:1b"),
+  AI_MODEL_LOCAL_TEST_PUBLIC_SUMMARY: z.string().default("gemma3:1b"),
   AI_RUNNER_NODE_ID: z.string().default("local-dev"),
   AI_RUNNER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(3000),
   AI_RUNNER_MAX_BATCH_PER_MODEL: z.coerce

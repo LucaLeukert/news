@@ -28,6 +28,16 @@ function decodeHtml(value: string) {
     .replaceAll("&gt;", ">");
 }
 
+function toIsoDateOrNull(value: string | null) {
+  if (!value) return null;
+
+  try {
+    return DateTime.formatIso(DateTime.makeUnsafe(value));
+  } catch {
+    return null;
+  }
+}
+
 export function extractMetadata(
   html: string,
   fetchedUrl: string,
@@ -64,9 +74,7 @@ export function extractMetadata(
     title,
     description,
     author,
-    publishedAt: publishedAtRaw
-      ? DateTime.formatIso(DateTime.makeUnsafe(publishedAtRaw))
-      : null,
+    publishedAt: toIsoDateOrNull(publishedAtRaw),
     language,
     paywalled,
   };

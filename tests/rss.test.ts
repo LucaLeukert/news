@@ -29,4 +29,30 @@ describe("RSS parsing and page validation", () => {
       "rss_verified",
     );
   });
+
+  it("decodes HTML entities in RSS titles before validation", () => {
+    const items = parseFeed(`
+      <rss><channel><title>ZDFheute</title><item>
+        <title>Wie die Gr&#252;nen von der SPD-Schw&#228;che profitieren wollen</title>
+        <link>https://example.com/story</link>
+        <pubDate>Tue, 28 Apr 2026 09:29:00 +0200</pubDate>
+      </item></channel></rss>
+    `);
+
+    const metadata = extractMetadata(
+      `<html lang="de"><head>
+        <link rel="canonical" href="https://example.com/story">
+        <meta property="og:title" content="Wie die Grünen von der SPD-Schwäche profitieren wollen">
+        <meta property="article:published_time" content="2026-04-28T07:29:47.762Z">
+      </head></html>`,
+      "https://example.com/story",
+    );
+
+    expect(items[0]?.title).toBe(
+      "Wie die Grünen von der SPD-Schwäche profitieren wollen",
+    );
+    expect(validateFeedItemAgainstPage(items[0], metadata)).toBe(
+      "rss_verified",
+    );
+  });
 });

@@ -38,6 +38,7 @@ export const aiJobType = pgEnum("ai_job_type", [
   "article_extraction_qa",
   "claim_extraction",
   "story_clustering_support",
+  "semantic_story_clustering_support",
   "neutral_story_summary",
   "bias_context_classification",
   "factuality_reliability_support",
