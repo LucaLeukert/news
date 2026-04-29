@@ -1,11 +1,11 @@
 import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Effect } from "effect";
 import { Article } from "./article";
 import { Configuration, getAvailableLanguages } from "./configuration";
-import { extractArticleBody } from "./extractors";
 import { parseDocument } from "./dom";
+import { extractArticleBody } from "./extractors";
 import { popularUrls } from "./resources";
 import { Source } from "./source";
 

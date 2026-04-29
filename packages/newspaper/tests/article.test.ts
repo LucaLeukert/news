@@ -23,16 +23,19 @@ describe("Article", () => {
     });
 
     await Effect.runPromise(
-      article
-        .download({ inputHtml: html })
-        .pipe(Effect.flatMap(() => article.parse()), Effect.provide(CrawlerHttpLive)),
+      article.download({ inputHtml: html }).pipe(
+        Effect.flatMap(() => article.parse()),
+        Effect.provide(CrawlerHttpLive),
+      ),
     );
 
     expect(article.title).toContain("nonstop sparring match");
     expect(article.metaLang).toBe(metadata.meta_lang);
     expect(article.authors).toEqual(metadata.authors);
     expect(article.topImage).toBe(metadata.top_image);
-    expect(article.text).toContain("Justice Samuel Alito is the tip of the spear");
+    expect(article.text).toContain(
+      "Justice Samuel Alito is the tip of the spear",
+    );
   });
 
   test("runs nlp on fixture content", async () => {
@@ -45,13 +48,11 @@ describe("Article", () => {
     });
 
     await Effect.runPromise(
-      article
-        .download({ inputHtml: html })
-        .pipe(
-          Effect.flatMap(() => article.parse()),
-          Effect.flatMap(() => article.nlp()),
-          Effect.provide(CrawlerHttpLive),
-        ),
+      article.download({ inputHtml: html }).pipe(
+        Effect.flatMap(() => article.parse()),
+        Effect.flatMap(() => article.nlp()),
+        Effect.provide(CrawlerHttpLive),
+      ),
     );
 
     expect(article.keywords.length).toBeGreaterThan(5);

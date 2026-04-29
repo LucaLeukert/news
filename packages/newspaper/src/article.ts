@@ -1,6 +1,7 @@
 import { Effect } from "effect";
-import { ArticleBinaryDataException, ArticleException } from "./errors";
 import { Configuration } from "./configuration";
+import { parseDocument } from "./dom";
+import { ArticleBinaryDataException, ArticleException } from "./errors";
 import {
   extractArticleBody,
   extractAuthors,
@@ -10,11 +11,10 @@ import {
   extractTitle,
   extractVideos,
 } from "./extractors";
-import { parseDocument } from "./dom";
-import { keywords, StopWords, summarize } from "./nlp";
+import { StopWords, keywords, summarize } from "./nlp";
+import { CrawlerHttp } from "./transport";
 import type { ArticleJson } from "./types";
 import { prepareUrl, validUrl } from "./url";
-import { CrawlerHttp } from "./transport";
 
 export enum ArticleDownloadState {
   NOT_STARTED = 0,
@@ -67,7 +67,9 @@ export class Article {
   ) {
     this.config = config;
     this.config.update(overrides ?? {});
-    this.sourceUrl = sourceUrl || `${new URL(prepareUrl(url)).protocol}//${new URL(prepareUrl(url)).hostname}`;
+    this.sourceUrl =
+      sourceUrl ||
+      `${new URL(prepareUrl(url)).protocol}//${new URL(prepareUrl(url)).hostname}`;
     this.url = prepareUrl(url, this.sourceUrl);
     this.originalUrl = this.url;
     this.title = title;
@@ -87,160 +89,192 @@ export class Article {
     readonly title?: string;
     readonly ignoreReadMore?: boolean;
   }) {
-    const self = this;
-    return Effect.gen(function* () {
-      if (options?.inputHtml != null) {
-        self.html = options.inputHtml;
-        if (options.title) self.title = options.title;
-        return self;
-      }
+    return Effect.gen(
+      function* (this: Article) {
+        if (options?.inputHtml != null) {
+          this.html = options.inputHtml;
+          if (options.title) this.title = options.title;
+          return this;
+        }
 
-      const http = yield* CrawlerHttp;
-      const response = yield* http.request(self.url, self.config.requestsParams);
-      const contentType = response.headers.get("content-type") ?? "";
-      if (
-        !self.config.allowBinaryContent &&
-        /^(image|video|audio|font|application\/(?!json|xml))/i.test(contentType)
-      ) {
-        self.downloadState = ArticleDownloadState.FAILED_RESPONSE;
-        self.downloadExceptionMsg = `Article is binary data: ${self.url}`;
-        return yield* new ArticleBinaryDataException({
-          message: self.downloadExceptionMsg,
-        });
-      }
-      const html = yield* response.text;
-      self.html = html;
-      if (options?.title) self.title = options.title;
-      return self;
-    });
+        const http = yield* CrawlerHttp;
+        const response = yield* http.request(
+          this.url,
+          this.config.requestsParams,
+        );
+        const contentType = response.headers.get("content-type") ?? "";
+        if (
+          !this.config.allowBinaryContent &&
+          /^(image|video|audio|font|application\/(?!json|xml))/i.test(
+            contentType,
+          )
+        ) {
+          this.downloadState = ArticleDownloadState.FAILED_RESPONSE;
+          this.downloadExceptionMsg = `Article is binary data: ${this.url}`;
+          return yield* new ArticleBinaryDataException({
+            message: this.downloadExceptionMsg,
+          });
+        }
+        const html = yield* response.text;
+        this.html = html;
+        if (options?.title) this.title = options.title;
+        return this;
+      }.bind(this),
+    );
   }
 
   parse() {
-    const self = this;
-    return Effect.gen(function* () {
-      if (self.downloadState === ArticleDownloadState.NOT_STARTED) {
-        return yield* new ArticleException({
-          message: "You must `download()` an article first!",
-        });
-      }
+    return Effect.gen(
+      function* (this: Article) {
+        if (this.downloadState === ArticleDownloadState.NOT_STARTED) {
+          return yield* new ArticleException({
+            message: "You must `download()` an article first!",
+          });
+        }
 
-      self.doc = parseDocument(self.html);
-      if (!self.doc) {
-        self.isParsed = true;
-        return self;
-      }
+        this.doc = parseDocument(this.html);
+        const document = this.doc;
+        if (!document) {
+          this.isParsed = true;
+          return this;
+        }
 
-      self.title = extractTitle(self.doc, self.config);
-      self.authors = extractAuthors(self.doc).slice(0, self.config.maxAuthors);
+        this.title = extractTitle(document, this.config);
+        this.authors = extractAuthors(document).slice(
+          0,
+          this.config.maxAuthors,
+        );
 
-      const meta = extractMeta(self.doc, self.url);
-      self.metaLang = meta.language ?? "";
-      if (meta.language && self.config.useMetaLanguage) {
-        self.config.language = meta.language;
-      }
-      self.metaDescription = meta.description;
-      self.metaSiteName = meta.siteName;
-      self.canonicalLink = meta.canonicalLink;
-      self.metaKeywords = meta.keywords.slice(0, self.config.maxKeywords);
-      self.tags = new Set(meta.tags);
-      self.metaData = meta.data;
-      self.publishDate = extractPublishDate(self.doc, self.url);
+        const meta = extractMeta(document, this.url);
+        this.metaLang = meta.language ?? "";
+        if (meta.language && this.config.useMetaLanguage) {
+          this.config.language = meta.language;
+        }
+        this.metaDescription = meta.description;
+        this.metaSiteName = meta.siteName;
+        this.canonicalLink = meta.canonicalLink;
+        this.metaKeywords = meta.keywords.slice(0, this.config.maxKeywords);
+        this.tags = new Set(meta.tags);
+        this.metaData = meta.data;
+        this.publishDate = extractPublishDate(document, this.url);
 
-      const body = extractArticleBody(
-        self.doc,
-        self.config.language ?? "en",
-        self.title,
-      );
-      self.topNode = body.topNode;
-      self.articleHtml = self.config.cleanArticleHtml ? body.articleHtml : self.html;
-      self.text = body.text;
+        const body = extractArticleBody(
+          document,
+          this.config.language ?? "en",
+          this.title,
+        );
+        this.topNode = body.topNode;
+        this.articleHtml = this.config.cleanArticleHtml
+          ? body.articleHtml
+          : this.html;
+        this.text = body.text;
 
-      const videos = extractVideos(self.doc, self.topNode);
-      self.movies = videos.map((video) => video.src).filter((value): value is string => Boolean(value));
+        const videos = extractVideos(document, this.topNode);
+        this.movies = videos
+          .map((video) => video.src)
+          .filter((value): value is string => Boolean(value));
 
-      const images = self.config.fetchImages
-        ? yield* Effect.gen(function* () {
-            const http = yield* CrawlerHttp;
-            return yield* Effect.promise(() =>
+        const currentTopNode = this.topNode;
+        const currentUrl = this.url;
+        const currentConfig = this.config;
+        const images = this.config.fetchImages
+          ? yield* Effect.gen(function* () {
+              const http = yield* CrawlerHttp;
+              return yield* Effect.promise(() =>
+                extractImages(
+                  document,
+                  currentTopNode,
+                  currentUrl,
+                  currentConfig,
+                  async (url, referer) => {
+                    const result = await Effect.runPromiseExit(
+                      http.request(url, {
+                        ...currentConfig.requestsParams,
+                        headers: {
+                          ...currentConfig.requestsParams.headers,
+                          Referer: referer,
+                        },
+                      }),
+                    );
+                    if (result._tag === "Failure") return null;
+                    const bytes = await Effect.runPromiseExit(
+                      result.value.bytes,
+                    );
+                    return bytes._tag === "Failure" ? null : bytes.value;
+                  },
+                ),
+              );
+            })
+          : yield* Effect.promise(() =>
               extractImages(
-                self.doc!,
-                self.topNode,
-                self.url,
-                self.config,
-                async (url, referer) => {
-                  const result = await Effect.runPromiseExit(
-                    http.request(url, {
-                      ...self.config.requestsParams,
-                      headers: {
-                        ...self.config.requestsParams.headers,
-                        Referer: referer,
-                      },
-                    }),
-                  );
-                  if (result._tag === "Failure") return null;
-                  const bytes = await Effect.runPromiseExit(result.value.bytes);
-                  return bytes._tag === "Failure" ? null : bytes.value;
-                },
+                document,
+                currentTopNode,
+                currentUrl,
+                currentConfig,
+                async () => null,
               ),
             );
-          })
-        : yield* Effect.promise(() =>
-            extractImages(
-              self.doc!,
-              self.topNode,
-              self.url,
-              self.config,
-              async () => null,
-            ),
-          );
-      self.metaFavicon = images.favicon;
-      self.metaImg = images.metaImage;
-      self.images = images.images;
-      self.topImage = images.topImage;
+        this.metaFavicon = images.favicon;
+        this.metaImg = images.metaImage;
+        this.images = images.images;
+        this.topImage = images.topImage;
 
-      self.isParsed = true;
-      return self;
-    });
+        this.isParsed = true;
+        return this;
+      }.bind(this),
+    );
   }
 
   nlp() {
-    const self = this;
-    return Effect.gen(function* () {
-      if (self.downloadState === ArticleDownloadState.NOT_STARTED) {
-        return yield* new ArticleException({
-          message: "You must `download()` an article first!",
-        });
-      }
-      if (!self.isParsed) {
-        return yield* new ArticleException({
-          message: "You must `parse()` an article first!",
-        });
-      }
+    return Effect.gen(
+      function* (this: Article) {
+        if (this.downloadState === ArticleDownloadState.NOT_STARTED) {
+          return yield* new ArticleException({
+            message: "You must `download()` an article first!",
+          });
+        }
+        if (!this.isParsed) {
+          return yield* new ArticleException({
+            message: "You must `parse()` an article first!",
+          });
+        }
 
-      const stopwords = new StopWords(self.config.language ?? "en");
-      const textKeywords = keywords(self.text, stopwords, self.config.maxKeywords);
-      const titleKeywords = keywords(self.title, stopwords, self.config.maxKeywords);
-      const merged = new Map<string, number>();
-      for (const [token, score] of Object.entries(textKeywords)) {
-        merged.set(token, score);
-      }
-      for (const [token, score] of Object.entries(titleKeywords)) {
-        merged.set(token, merged.has(token) ? ((merged.get(token) ?? 0) + score) / 2 : score);
-      }
-      self.keywordScores = Object.fromEntries(
-        Array.from(merged.entries())
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, self.config.maxKeywords),
-      );
-      self.keywords = Object.keys(self.keywordScores);
-      self.summary = summarize(
-        self.title,
-        self.text,
-        stopwords,
-        self.config.maxSummarySent,
-      ).join("\n");
-      return self;
-    });
+        const stopwords = new StopWords(this.config.language ?? "en");
+        const textKeywords = keywords(
+          this.text,
+          stopwords,
+          this.config.maxKeywords,
+        );
+        const titleKeywords = keywords(
+          this.title,
+          stopwords,
+          this.config.maxKeywords,
+        );
+        const merged = new Map<string, number>();
+        for (const [token, score] of Object.entries(textKeywords)) {
+          merged.set(token, score);
+        }
+        for (const [token, score] of Object.entries(titleKeywords)) {
+          merged.set(
+            token,
+            merged.has(token) ? ((merged.get(token) ?? 0) + score) / 2 : score,
+          );
+        }
+        this.keywordScores = Object.fromEntries(
+          Array.from(merged.entries())
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, this.config.maxKeywords),
+        );
+        this.keywords = Object.keys(this.keywordScores);
+        this.summary = summarize(
+          this.title,
+          this.text,
+          stopwords,
+          this.config.maxSummarySent,
+        ).join("\n");
+        return this;
+      }.bind(this),
+    );
   }
 
   isValidUrl() {
@@ -248,9 +282,15 @@ export class Article {
   }
 
   isMediaNews() {
-    return ["/video", "/slide", "/gallery", "/powerpoint", "/fashion", "/glamour", "/cloth"].some((entry) =>
-      this.url.includes(entry),
-    );
+    return [
+      "/video",
+      "/slide",
+      "/gallery",
+      "/powerpoint",
+      "/fashion",
+      "/glamour",
+      "/cloth",
+    ].some((entry) => this.url.includes(entry));
   }
 
   isValidBody() {

@@ -12,7 +12,7 @@ export const cloneDocument = (document: Document): Document =>
   parseHTML(document.toString()).document;
 
 export const queryAll = <T extends Element = Element>(
-  root: ParentNode,
+  root: Document | Element,
   selector: string,
 ): T[] => Array.from(root.querySelectorAll(selector)) as T[];
 
@@ -31,9 +31,7 @@ export const removeNodes = (nodes: Iterable<Element>) => {
 };
 
 export const serializeNode = (node: Node) =>
-  node.nodeType === 1
-    ? (node as Element).outerHTML
-    : node.textContent ?? "";
+  node.nodeType === 1 ? (node as Element).outerHTML : (node.textContent ?? "");
 
 export const absoluteUrl = (value: string, base: string) => {
   try {

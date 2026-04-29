@@ -1,12 +1,16 @@
 import { Effect } from "effect";
 import { parse as parseDomain } from "tldts";
-import { Configuration } from "./configuration";
-import { extractArticleLinks, extractCategoryUrls, extractFeedUrls } from "./extractors";
-import { parseDocument } from "./dom";
-import { prepareUrl, validUrl } from "./url";
-import type { Category, Feed } from "./types";
 import { Article } from "./article";
+import { Configuration } from "./configuration";
+import { parseDocument } from "./dom";
+import {
+  extractArticleLinks,
+  extractCategoryUrls,
+  extractFeedUrls,
+} from "./extractors";
 import { CrawlerHttp, type CrawlerResponse } from "./transport";
+import type { Category, Feed } from "./types";
+import { prepareUrl, validUrl } from "./url";
 
 const uniqueBy = <T, K>(items: ReadonlyArray<T>, key: (item: T) => K) =>
   Array.from(new Map(items.map((item) => [key(item), item])).values());
@@ -53,45 +57,50 @@ export class Source {
     readonly onlyHomepage?: boolean;
     readonly onlyInPath?: boolean;
   }) {
-    const self = this;
-    return Effect.gen(function* () {
-      if (options?.inputHtml) {
-        self.html = options.inputHtml;
-        self.isDownloaded = true;
-      } else {
-        yield* self.download();
-      }
+    return Effect.gen(
+      function* (this: Source) {
+        if (options?.inputHtml) {
+          this.html = options.inputHtml;
+          this.isDownloaded = true;
+        } else {
+          yield* this.download();
+        }
 
-      self.parse();
-      if (!self.doc) return self;
+        this.parse();
+        if (!this.doc) return this;
 
-      if (options?.onlyHomepage) {
-        self.categories = [{ url: self.url, html: self.html, doc: self.doc }];
-      } else {
-        self.setCategories();
-        yield* self.downloadCategories();
-        self.parseCategories();
-      }
+        if (options?.onlyHomepage) {
+          this.categories = [{ url: this.url, html: this.html, doc: this.doc }];
+        } else {
+          this.setCategories();
+          yield* this.downloadCategories();
+          this.parseCategories();
+        }
 
-      if (!options?.onlyHomepage) {
-        self.setFeeds();
-        yield* self.downloadFeeds();
-      }
+        if (!options?.onlyHomepage) {
+          this.setFeeds();
+          yield* this.downloadFeeds();
+        }
 
-      self.generateArticles({ onlyInPath: options?.onlyInPath });
-      return self;
-    });
+        this.generateArticles({ onlyInPath: options?.onlyInPath });
+        return this;
+      }.bind(this),
+    );
   }
 
   download() {
-    const self = this;
-    return Effect.gen(function* () {
-      const http = yield* CrawlerHttp;
-      const response = yield* http.request(self.url, self.config.requestsParams);
-      self.html = yield* response.text;
-      self.isDownloaded = true;
-      return self;
-    });
+    return Effect.gen(
+      function* (this: Source) {
+        const http = yield* CrawlerHttp;
+        const response = yield* http.request(
+          this.url,
+          this.config.requestsParams,
+        );
+        this.html = yield* response.text;
+        this.isDownloaded = true;
+        return this;
+      }.bind(this),
+    );
   }
 
   parse() {
@@ -114,20 +123,23 @@ export class Source {
   }
 
   downloadCategories() {
-    const self = this;
-    return Effect.gen(function* () {
-      const http = yield* CrawlerHttp;
-      for (const category of self.categories) {
-        const response = yield* http
-          .request(category.url, self.config.requestsParams)
-          .pipe(Effect.orElseSucceed(() => null as CrawlerResponse | null));
-        if (response) {
-          category.html = yield* response.text;
+    return Effect.gen(
+      function* (this: Source) {
+        const http = yield* CrawlerHttp;
+        for (const category of this.categories) {
+          const response = yield* http
+            .request(category.url, this.config.requestsParams)
+            .pipe(Effect.orElseSucceed(() => null as CrawlerResponse | null));
+          if (response) {
+            category.html = yield* response.text;
+          }
         }
-      }
-      self.categories = self.categories.filter((category: Category) => Boolean(category.html));
-      return self.categories;
-    });
+        this.categories = this.categories.filter((category: Category) =>
+          Boolean(category.html),
+        );
+        return this.categories;
+      }.bind(this),
+    );
   }
 
   parseCategories() {
@@ -145,27 +157,30 @@ export class Source {
       this.doc,
       ...this.categories.map((category) => category.doc).filter(Boolean),
     ];
-    this.feeds = extractFeedUrls(this.url, documents as Document[]).map((url) => ({
-      url,
-      rss: null,
-    }));
+    this.feeds = extractFeedUrls(this.url, documents as Document[]).map(
+      (url) => ({
+        url,
+        rss: null,
+      }),
+    );
   }
 
   downloadFeeds() {
-    const self = this;
-    return Effect.gen(function* () {
-      const http = yield* CrawlerHttp;
-      for (const feed of self.feeds) {
-        const response = yield* http
-          .request(feed.url, self.config.requestsParams)
-          .pipe(Effect.orElseSucceed(() => null as CrawlerResponse | null));
-        if (response) {
-          feed.rss = yield* response.text;
+    return Effect.gen(
+      function* (this: Source) {
+        const http = yield* CrawlerHttp;
+        for (const feed of this.feeds) {
+          const response = yield* http
+            .request(feed.url, this.config.requestsParams)
+            .pipe(Effect.orElseSucceed(() => null as CrawlerResponse | null));
+          if (response) {
+            feed.rss = yield* response.text;
+          }
         }
-      }
-      self.feeds = self.feeds.filter((feed: Feed) => Boolean(feed.rss));
-      return self.feeds;
-    });
+        this.feeds = this.feeds.filter((feed: Feed) => Boolean(feed.rss));
+        return this.feeds;
+      }.bind(this),
+    );
   }
 
   private feedArticles() {
@@ -173,7 +188,9 @@ export class Source {
       const rssDoc = feed.rss ? parseDocument(feed.rss) : null;
       if (!rssDoc) return [];
       return Array.from(rssDoc.querySelectorAll("item > link, entry > link"))
-        .map((node) => node.textContent?.trim() ?? node.getAttribute("href") ?? "")
+        .map(
+          (node) => node.textContent?.trim() ?? node.getAttribute("href") ?? "",
+        )
         .filter(validUrl)
         .map(
           (url) =>
@@ -198,7 +215,10 @@ export class Source {
     });
   }
 
-  generateArticles(options?: { readonly limit?: number; readonly onlyInPath?: boolean }) {
+  generateArticles(options?: {
+    readonly limit?: number;
+    readonly onlyInPath?: boolean;
+  }) {
     const limit = options?.limit ?? 5000;
     let articles = uniqueBy(
       [...this.feedArticles(), ...this.categoryArticles()],
@@ -220,26 +240,30 @@ export class Source {
   }
 
   downloadArticles() {
-    const self = this;
-    return Effect.gen(function* () {
-      for (const article of self.articles) {
-        yield* article.download();
-      }
-      self.isDownloaded = true;
-      return self.articles;
-    });
+    return Effect.gen(
+      function* (this: Source) {
+        for (const article of this.articles) {
+          yield* article.download();
+        }
+        this.isDownloaded = true;
+        return this.articles;
+      }.bind(this),
+    );
   }
 
   parseArticles() {
-    const self = this;
-    return Effect.gen(function* () {
-      for (const article of self.articles) {
-        yield* article.parse();
-      }
-      self.articles = self.articles.filter((article: Article) => article.isValidBody());
-      self.isParsed = true;
-      return self.articles;
-    });
+    return Effect.gen(
+      function* (this: Source) {
+        for (const article of this.articles) {
+          yield* article.parse();
+        }
+        this.articles = this.articles.filter((article: Article) =>
+          article.isValidBody(),
+        );
+        this.isParsed = true;
+        return this.articles;
+      }.bind(this),
+    );
   }
 
   size() {

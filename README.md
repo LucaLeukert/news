@@ -1,123 +1,134 @@
 # Coverage Lens
 
-Production-oriented multilingual news comparison platform scaffolded for:
+Coverage Lens is a multilingual news comparison platform built around one
+principle: canonical backend state stays typed, reviewable, and operationally
+observable.
 
-- Next.js on Vercel for public/admin UI.
-- Cloudflare Workers for public/internal APIs and cron entrypoints.
-- Neon/Postgres via Drizzle as canonical data storage.
-- Convex for frontend-facing user state and feed projections only.
-- Local outbound-only `gpt-oss-20b` AI runner.
-- Effect services/layers for runtime composition, logging, metrics, retries, and typed fallback paths.
-- Clerk for user management and billing identity.
-- T3 Env for package/runtime environment validation.
-- Oxlint plus Biome for fast linting and formatting.
+The stack is intentionally split:
 
-The repository intentionally stores and displays publisher metadata, links, and short snippets only. Raw crawl artifacts belong in R2, not Postgres.
+- `apps/web`: public product UI on Next.js. Reads projection data and does not
+  call internal RPC directly.
+- `apps/admin`: internal operations UI on Next.js. Uses typed internal RPC for
+  operational reads and mutations.
+- `apps/api`: Cloudflare Worker API and Effect RPC boundary.
+- `services/*`: crawler, scheduler, clusterer, parser, and AI runner.
+- `packages/*`: shared domain schemas, DB schema, Effect platform services,
+  env parsing, crawler primitives, and AI contracts.
 
-Frontend user interactions such as follows, hides, saved stories, feed
-projections, and notifications belong in Convex. Backend APIs use the
-Neon/Postgres side for canonical news data, crawl state, AI jobs, and
-compliance workflows.
+The repository stores publisher metadata, links, and short snippets only. Raw
+HTML and other crawl artifacts belong in object storage, not Postgres.
 
 ## Quick Start
 
 ```sh
 bun install
 bun test
-bun typecheck
+bun run typecheck
+bun run lint
 bun run dev
 ```
 
-Use `docker compose up -d postgres model-mock` for local infrastructure.
+Use `docker compose up -d postgres model-mock` for local infrastructure when
+you need the local database and model fixtures.
 
-`bun run dev` is the local app/dev entrypoint. It starts `@news/api`,
-`@news/web`, and `@news/admin` only, and does not require the local AI runner
-or a configured AI model. Use `bun run dev:all` only when you explicitly want
-the full workspace dev graph, including service packages.
+`bun run dev` starts the main local app graph:
 
-## First Ingestion Run
+- `@news/api`
+- `@news/web`
+- `@news/admin`
+- `@news/convex`
+
+Use `bun run dev:all` only when you explicitly want the full workspace graph.
+
+## First Crawl
 
 ```sh
 bun run db:migrate
 bun run crawler:seed-and-ingest --feed-url <feed-url> --source-name <publisher> --source-domain <publisher-domain> [--country-code <cc>] [--language <lang>]
 ```
 
-That seeded crawler command will upsert the source/feed rows, fetch and
-validate feed items, persist article metadata into Postgres, rebuild current
-story clusters, and enqueue `neutral_story_summary` AI jobs.
+That command seeds the source/feed rows, verifies feed items against canonical
+article pages, persists article metadata, rebuilds current story clusters, and
+queues story-summary AI jobs.
 
-Then run:
+To run the local stack afterward:
 
 ```sh
 bun run api:dev
 bun run ai:runner
 ```
 
-The AI runner now uses the global AI host and model policy settings from
-`.env`. For local `ollama` testing, set `AI_HOST_PROFILE=local`,
-`AI_MODEL_POLICY_PROFILE=local_test`, and keep
-`AI_HOST_LOCAL_BASE_URL=http://localhost:11434/v1`.
+## Architecture
 
-## Remote AI Runner
+### Runtime Boundaries
 
-To run the AI worker on the Windows LM Studio host:
+- Vercel hosts `apps/web` and `apps/admin`.
+- Cloudflare Workers host `apps/api` and `services/scheduler`.
+- Neon/Postgres is the canonical store for sources, feeds, crawl state,
+  articles, stories, AI jobs, AI results, and review/compliance state.
+- Convex holds frontend-facing projections and user state only.
+- R2 stores raw crawl artifacts where legally allowed.
+- The AI runner polls outbound, leases jobs from the API, and posts structured
+  results back.
+
+### Internal Networking
+
+- Services and admin operations go through Effect RPC exposed by `apps/api`.
+- Public product pages should read projection data, not internal RPC.
+- Neon is canonical; Convex is a derived read model.
+- Avoid ad hoc REST endpoints when a typed RPC contract exists.
+
+### Effect Runtime
+
+Application boundaries use `Effect.Effect` and runtime services from
+`@news/platform`:
+
+- `HttpService`
+- `MetricsService`
+- `AiGateway`
+- `AuthService`
+- `BillingService`
+
+Runtime composition happens through layers, with env validation coming from
+`@news/env`.
+
+### AI and Publication Gates
+
+- AI outputs are versioned, probabilistic, and stored with validation status.
+- Public AI summaries require `confidence >= 0.80`.
+- Weak ownership or political-context evidence remains unpublished even when a
+  numeric score is present.
+- The product compares coverage patterns; it is not a fact-checker.
+
+### Crawl Rules
+
+- RSS and Google News RSS items are discovery hints only.
+- Every item must resolve to a canonical article page and receive a validation
+  state before clustering.
+- The crawler must respect robots.txt, source policy rows, rate limits,
+  takedowns, login walls, and paywalls.
+
+## Quality Gates
+
+Run these before finishing backend-heavy work:
 
 ```sh
-bun run api:dev:lan
-bun run remote:ai:sync
-bun run remote:ai:start
+bun test
+bun run typecheck
+bun run lint
+bun effect:lsp diagnostics --project /Users/lucaleukert/src/news/tsconfig.base.json --format text
 ```
 
-Use [.env.remote-ai.example](/Users/lucaleukert/src/news/.env.remote-ai.example:1)
-as the template for the remote `.env.remote-ai` file. Set
-`AI_HOST_PROFILE=real` and `AI_MODEL_POLICY_PROFILE=real` there so the Windows
-runner keeps using the real host and production model map. The runner leases
-jobs grouped by the active model policy order, processing a batch of one model
-before moving to the next to avoid repeated model hot-loading on the active
-host.
+Effect LSP errors are blockers. Warnings in untouched legacy code should be
+reduced when practical, not ignored by default.
 
-## AI Switching
+## Runbook
 
-The global switches live in `.env`:
+Operational procedures, compliance notes, remote AI runner steps, and eval
+dataset guidance live in [RUNBOOK.md](/Users/lucaleukert/src/news/RUNBOOK.md).
 
-- `AI_HOST_PROFILE=local|real`
-- `AI_MODEL_POLICY_PROFILE=local_test|real`
+## Historical Planning
 
-`bun run dev:local` now honors `AI_HOST_PROFILE`:
-
-- `local`: starts the local `@news/ai-runner` inside Turbo and skips the
-  Windows sync step.
-- `real`: syncs the Windows AI runner and keeps the local Turbo graph focused
-  on the web/admin/api stack.
-
-## Workspace
-
-- `apps/web`: public story comparison product.
-- `apps/admin`: internal operations console.
-- `apps/api`: Cloudflare Worker API gateway.
-- `services/*`: crawler, parser, clusterer, scheduler, and local AI runner.
-- `packages/shared`: shared Effect Schema contracts, constants, taxonomy helpers, and URL normalization.
-- `packages/types`: canonical shared domain types, Effect Schema contracts, and value helpers.
-- `packages/platform`: Effect runtime services for HTTP, metrics, auth, billing, AI, and logging.
-- `packages/env`: shared T3 Env schemas and typed env loaders for Next, workers, services, Convex, and DB tooling.
-- `packages/db`: Drizzle schema and SQL migrations.
-- `packages/ai`: prompt versions, structured output schemas, model adapter.
-- `packages/crawler-core`: compliant crawling primitives.
-
-## Non-Negotiables
-
-- RSS and Google News RSS items must be verified against canonical article pages.
-- AI labels are versioned probabilistic outputs with confidence gates.
-- Public AI summaries require `confidence >= 0.80`.
-- Weak bias/ownership evidence remains unpublished.
-- The product compares source patterns; it is not a real-time fact checker.
-
-## Effect Runtime
-
-Application code should return `Effect.Effect` at service boundaries. Use
-`@news/platform` tags and layers for HTTP, metrics, AI, Clerk auth, billing, and
-runtime configuration. Environment validation should come from `@news/env`, with
-root `.env` as the single local source of truth.
-
-Effect devtools are wired through the TypeScript language-service plugin in
-`tsconfig.base.json`; run `bun effect:lsp` when configuring editor integration.
+The original product planning document is kept in
+[plan-build-a-ground-news-competitor-with-ai-reviewed-global-news-coverage.md](/Users/lucaleukert/src/news/plan-build-a-ground-news-competitor-with-ai-reviewed-global-news-coverage.md)
+as background context, not as the current source of truth.

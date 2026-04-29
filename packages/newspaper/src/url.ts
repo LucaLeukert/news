@@ -1,7 +1,7 @@
 import { parse as parseDomain } from "tldts";
 
 const DATE_REGEX =
-  /(?:[\./\-_\s]?(?:19|20)\d{2})[\./\-_\s]?(?:[0-3]?[0-9][\./\-_\s]|\w{3,5}[\./\-_\s])(?:[0-3]?[0-9])(?:[\./\-\+\?]|$)/;
+  /(?:[./\-_\s]?(?:19|20)\d{2})[./\-_\s]?(?:[0-3]?[0-9][./\-_\s]|\w{3,5}[./\-_\s])(?:[0-3]?[0-9])(?:[./\-+?]|$)/;
 
 const GOOD_PATHS = new Set([
   "story",
@@ -110,7 +110,9 @@ export const urlToFiletype = (input: string) => {
   if (!extension) {
     return null;
   }
-  return extension.length <= 5 || ALLOWED_TYPES.has(extension) ? extension : null;
+  return extension.length <= 5 || ALLOWED_TYPES.has(extension)
+    ? extension
+    : null;
 };
 
 export const validUrl = (input: string) => {

@@ -1,11 +1,18 @@
 import * as chrono from "chrono-node";
 import { imageSize } from "image-size";
-import { attr, queryAll, removeNodes, serializeNode, textOf, absoluteUrl } from "./dom";
+import type { Configuration } from "./configuration";
+import {
+  absoluteUrl,
+  attr,
+  queryAll,
+  removeNodes,
+  serializeNode,
+  textOf,
+} from "./dom";
 import { normalizeLanguageCode } from "./languages";
 import { StopWords } from "./nlp";
-import { prepareUrl, validUrl } from "./url";
 import type { JsonValue, Video } from "./types";
-import { Configuration } from "./configuration";
+import { prepareUrl, validUrl } from "./url";
 
 const AUTHOR_ATTRS = ["name", "rel", "itemprop", "class", "id", "property"];
 const AUTHOR_VALS = [
@@ -88,10 +95,7 @@ const normalized = (value: string) =>
     .toLowerCase();
 
 const collectJsonLd = (document: Document) =>
-  queryAll<HTMLScriptElement>(
-    document,
-    'script[type="application/ld+json"]',
-  )
+  queryAll<HTMLScriptElement>(document, 'script[type="application/ld+json"]')
     .map((node) => node.textContent ?? "")
     .flatMap((value) => {
       try {
@@ -111,14 +115,17 @@ export const extractTitle = (document: Document, config: Configuration) => {
     .filter((value) => value.split(" ").length > 2)
     .sort((a, b) => b.length - a.length);
   const h1 = h1Candidates[0] ?? "";
-  const ogTitle = [
-    'meta[property="og:title"]',
-    'meta[name="og:title"]',
-    'meta[name="headline"]',
-    'meta[name="title"]',
-  ]
-    .map((selector) => attr(document.querySelector(selector), "content") ?? "")
-    .find(Boolean) ?? "";
+  const ogTitle =
+    [
+      'meta[property="og:title"]',
+      'meta[name="og:title"]',
+      'meta[name="headline"]',
+      'meta[name="title"]',
+    ]
+      .map(
+        (selector) => attr(document.querySelector(selector), "content") ?? "",
+      )
+      .find(Boolean) ?? "";
 
   let candidate = titleText;
   if (h1 && normalized(h1) === normalized(titleText)) {
@@ -169,7 +176,10 @@ export const extractMeta = (document: Document, articleUrl: string) => {
 
   const description =
     attr(document.querySelector('meta[name="description"]'), "content") ??
-    attr(document.querySelector('meta[property="og:description"]'), "content") ??
+    attr(
+      document.querySelector('meta[property="og:description"]'),
+      "content",
+    ) ??
     "";
 
   const siteName =
@@ -193,7 +203,10 @@ export const extractMeta = (document: Document, articleUrl: string) => {
   }
 
   const tags = new Set<string>();
-  for (const node of queryAll(document, 'a[rel="tag"], a[href*="/tag/"], a[href*="/topic/"]')) {
+  for (const node of queryAll(
+    document,
+    'a[rel="tag"], a[href*="/tag/"], a[href*="/topic/"]',
+  )) {
     const value = cleanText(textOf(node));
     if (value) tags.add(value);
   }
@@ -201,7 +214,8 @@ export const extractMeta = (document: Document, articleUrl: string) => {
   return {
     language: /^[a-z]{2}$/i.test(language) ? language.toLowerCase() : null,
     type:
-      attr(document.querySelector('meta[property="og:type"]'), "content") ?? null,
+      attr(document.querySelector('meta[property="og:type"]'), "content") ??
+      null,
     canonicalLink: absoluteUrl(canonical, articleUrl),
     siteName,
     description,
@@ -226,7 +240,11 @@ export const extractAuthors = (document: Document) => {
           const name = (value as Record<string, JsonValue>).name;
           if (typeof name === "string") authors.push(cleanText(name));
         }
-        if (Array.isArray(value)) value.forEach((entry) => pushName(entry));
+        if (Array.isArray(value)) {
+          for (const entry of value) {
+            pushName(entry);
+          }
+        }
       };
       pushName(author);
       if ((graphItem as Record<string, JsonValue>)["@type"] === "Person") {
@@ -261,11 +279,19 @@ export const extractAuthors = (document: Document) => {
     }
   }
 
-  const stopwordRegex = new RegExp(`\\b(${AUTHOR_STOP_WORDS.join("|")})\\b`, "gi");
+  const stopwordRegex = new RegExp(
+    `\\b(${AUTHOR_STOP_WORDS.join("|")})\\b`,
+    "gi",
+  );
   return Array.from(
     new Map(
       authors
-        .map((author) => author.replace(stopwordRegex, "").trim().replace(/^[\s.,/-]+|[\s.,/-]+$/g, ""))
+        .map((author) =>
+          author
+            .replace(stopwordRegex, "")
+            .trim()
+            .replace(/^[\s.,/-]+|[\s.,/-]+$/g, ""),
+        )
         .filter(Boolean)
         .map((author) => [author.toLowerCase(), author] as const),
     ).values(),
@@ -307,7 +333,8 @@ export const extractPublishDate = (document: Document, articleUrl: string) => {
       const maybeDate =
         (graphItem as Record<string, JsonValue>).datePublished ??
         (graphItem as Record<string, JsonValue>).dateCreated;
-      const parsed = typeof maybeDate === "string" ? tryParseDate(maybeDate) : null;
+      const parsed =
+        typeof maybeDate === "string" ? tryParseDate(maybeDate) : null;
       if (parsed) candidates.push({ date: parsed, score: 9 });
     }
   }
@@ -318,7 +345,10 @@ export const extractPublishDate = (document: Document, articleUrl: string) => {
   }
 
   for (const key of PUBLISH_DATE_META_INFO) {
-    for (const node of queryAll(document, `meta[name="${key}"], meta[property="${key}"]`)) {
+    for (const node of queryAll(
+      document,
+      `meta[name="${key}"], meta[property="${key}"]`,
+    )) {
       const parsed = tryParseDate(attr(node, "content"));
       if (parsed) candidates.push({ date: parsed, score: 7 });
     }
@@ -352,14 +382,19 @@ const scoreNode = (node: Element, language: string) => {
       score += boost.score;
     }
   }
-  if (BAD_NODE_PATTERNS.test(attr(node, "class") ?? "") || BAD_NODE_PATTERNS.test(attr(node, "id") ?? "")) {
+  if (
+    BAD_NODE_PATTERNS.test(attr(node, "class") ?? "") ||
+    BAD_NODE_PATTERNS.test(attr(node, "id") ?? "")
+  ) {
     score -= 25;
   }
   return score;
 };
 
 const removeBadNodes = (document: Document) => {
-  removeNodes(queryAll(document, "script, style, noscript, aside, nav, menu, footer"));
+  removeNodes(
+    queryAll(document, "script, style, noscript, aside, nav, menu, footer"),
+  );
   removeNodes(
     queryAll(document, "*").filter((node) => {
       const className = attr(node, "class") ?? "";
@@ -426,7 +461,10 @@ const toText = (node: Node, title?: string): string => {
     for (const child of Array.from(element.childNodes)) {
       walk(child);
     }
-    if (blockLevelTags.has(element.tagName.toLowerCase()) && parts.length > before) {
+    if (
+      blockLevelTags.has(element.tagName.toLowerCase()) &&
+      parts.length > before
+    ) {
       parts.push("\n\n");
     }
   };
@@ -436,15 +474,12 @@ const toText = (node: Node, title?: string): string => {
     .replace(/(?:\s*\n\s*){2,}/g, "\n\n")
     .replace(/[ \t]+/g, " ")
     .trim();
-  const filteredParagraphs = (baseText ? baseText.split(/\n{2,}/).filter(Boolean) : [])
-    .filter(
-      (paragraph, index) =>
-        !(
-          index === 0 &&
-          paragraph.length < 50 &&
-          /[—-]$/.test(paragraph)
-        ),
-    );
+  const filteredParagraphs = (
+    baseText ? baseText.split(/\n{2,}/).filter(Boolean) : []
+  ).filter(
+    (paragraph, index) =>
+      !(index === 0 && paragraph.length < 50 && /[—-]$/.test(paragraph)),
+  );
   if (!title) return filteredParagraphs.join("\n\n");
   if (
     filteredParagraphs.length > 0 &&
@@ -462,13 +497,20 @@ const toText = (node: Node, title?: string): string => {
   return filteredParagraphs.join("\n\n");
 };
 
-export const extractArticleBody = (document: Document, language: string, title?: string) => {
+export const extractArticleBody = (
+  document: Document,
+  language: string,
+  title?: string,
+) => {
   const cloned = document.cloneNode(true) as Document;
   removeBadNodes(cloned);
   const candidates = queryAll(cloned, "article, div, p, pre, td");
   const scored = candidates
     .map((node) => ({ node, score: scoreNode(node, language) }))
-    .filter((entry): entry is { node: Element; score: number } => entry.score !== null)
+    .filter(
+      (entry): entry is { node: Element; score: number } =>
+        entry.score !== null,
+    )
     .sort((a, b) => b.score - a.score);
   const topNode = scored[0]?.node ?? cloned.body ?? cloned.documentElement;
   const complemented = complementNode(topNode, language) ?? topNode;
@@ -480,8 +522,18 @@ export const extractArticleBody = (document: Document, language: string, title?:
   };
 };
 
-export const extractVideos = (document: Document, topNode: Element | null): Video[] => {
-  const providers = ["youtube", "youtu.be", "vimeo", "dailymotion", "kewego", "twitch"];
+export const extractVideos = (
+  document: Document,
+  topNode: Element | null,
+): Video[] => {
+  const providers = [
+    "youtube",
+    "youtu.be",
+    "vimeo",
+    "dailymotion",
+    "kewego",
+    "twitch",
+  ];
   const videos = new Map<string, Video>();
   const root = topNode ?? document;
 
@@ -515,7 +567,8 @@ export const extractVideos = (document: Document, topNode: Element | null): Vide
           embedType: "json-ld",
           width: null,
           height: null,
-          provider: providers.find((provider) => src.includes(provider)) ?? null,
+          provider:
+            providers.find((provider) => src.includes(provider)) ?? null,
         });
       }
     }
@@ -536,15 +589,19 @@ export const extractImages = async (
   const metaImage =
     META_IMAGE_SELECTORS.map((selector) => {
       const node = document.querySelector(selector);
-      return attr(node, node?.tagName.toLowerCase() === "link" ? "href" : "content");
+      return attr(
+        node,
+        node?.tagName.toLowerCase() === "link" ? "href" : "content",
+      );
     }).find(Boolean) ?? "";
 
   const images = Array.from(
     new Set(
       queryAll(document, "img")
         .map((image) => {
-          const candidates = Object.keys((image as HTMLElement).attributes ?? {})
-            .map(() => null);
+          const candidates = Object.keys(
+            (image as HTMLElement).attributes ?? {},
+          ).map(() => null);
           void candidates;
           return (
             attr(image, "src") ??
@@ -558,10 +615,9 @@ export const extractImages = async (
     ),
   );
 
-  const allCandidates = [
-    absoluteUrl(metaImage, articleUrl),
-    ...images,
-  ].filter(Boolean);
+  const allCandidates = [absoluteUrl(metaImage, articleUrl), ...images].filter(
+    Boolean,
+  );
 
   let topImage = allCandidates[0] ?? "";
   if (config.fetchImages) {
@@ -580,9 +636,7 @@ export const extractImages = async (
           topImage = candidate;
           break;
         }
-      } catch {
-        continue;
-      }
+      } catch {}
     }
   }
 
@@ -619,7 +673,10 @@ export const extractCategoryUrls = (sourceUrl: string, document: Document) => {
   return Array.from(urls).sort();
 };
 
-export const extractFeedUrls = (sourceUrl: string, documents: ReadonlyArray<Document>) => {
+export const extractFeedUrls = (
+  sourceUrl: string,
+  documents: ReadonlyArray<Document>,
+) => {
   const feeds = new Set<string>();
   for (const document of documents) {
     for (const node of queryAll(

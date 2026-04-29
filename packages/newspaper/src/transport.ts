@@ -1,8 +1,8 @@
 import { Context, Effect, Layer, Schedule } from "effect";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
+import type * as HttpHeaders from "effect/unstable/http/Headers";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
-import type * as HttpHeaders from "effect/unstable/http/Headers";
 import type { HttpMethod } from "effect/unstable/http/HttpMethod";
 import { NewspaperError } from "./errors";
 
@@ -21,9 +21,10 @@ export type CrawlerHttpShape = {
   ) => Effect.Effect<CrawlerResponse, NewspaperError>;
 };
 
-export class CrawlerHttp extends Context.Service<CrawlerHttp, CrawlerHttpShape>()(
-  "@news/newspaper/CrawlerHttp",
-) {}
+export class CrawlerHttp extends Context.Service<
+  CrawlerHttp,
+  CrawlerHttpShape
+>()("@news/newspaper/CrawlerHttp") {}
 
 const toHeadersInput = (
   headers: HeadersInit | undefined,
@@ -36,7 +37,7 @@ const toHeadersInput = (
 
 const toRequest = (input: string | URL, init?: RequestInit) => {
   let request = HttpClientRequest.make(
-    ((init?.method ?? "GET").toUpperCase() as HttpMethod),
+    (init?.method ?? "GET").toUpperCase() as HttpMethod,
   )(input, {
     headers: toHeadersInput(init?.headers),
   });

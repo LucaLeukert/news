@@ -26,8 +26,7 @@ for (const line of source.split(/\r?\n/u)) {
 const body = [...values.entries()]
   .filter(
     ([key, value]) =>
-      Boolean(value) &&
-      (allowedKeys.includes(key) || key.startsWith("AI_")),
+      Boolean(value) && (allowedKeys.includes(key) || key.startsWith("AI_")),
   )
   .map(([key, value]) => `${key}=${value}`)
   .join("\n");

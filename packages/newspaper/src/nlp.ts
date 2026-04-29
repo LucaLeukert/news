@@ -1,6 +1,6 @@
+import { normalizeLanguageCode } from "./languages";
 import { readStopwords } from "./resources";
 import type { WordStats } from "./types";
-import { normalizeLanguageCode } from "./languages";
 
 const contractionSeparators = /[-'`ʹʻʼʽʾʿˈˊ‘’‛′‵Ꞌꞌ]+/g;
 const punctuation = /[\p{P}\p{S}]+/gu;
@@ -137,7 +137,7 @@ const dbs = (
     const second = keys[index + 1];
     if (!first || !second) continue;
     const distance = second[0] - first[0];
-    sum += (first[1] * second[1]) / (distance ** 2);
+    sum += (first[1] * second[1]) / distance ** 2;
     intersection.add(first[2]);
   }
   const last = keys.at(-1);
@@ -186,7 +186,8 @@ export const summarize = (
   return sentences
     .map((sentence, index) => {
       const tokens = stopwords.tokenizer(sentence);
-      const frequency = ((sbs(tokens, keywordScores) + dbs(tokens, keywordScores)) / 2) * 10;
+      const frequency =
+        ((sbs(tokens, keywordScores) + dbs(tokens, keywordScores)) / 2) * 10;
       const score =
         (titleScore(titleTokens, tokens, stopwords) * 1.5 +
           frequency * 2 +
