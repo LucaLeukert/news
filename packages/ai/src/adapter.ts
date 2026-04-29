@@ -70,7 +70,7 @@ export const StructuredAiLive = (policy: AiModelPolicy = modelPolicy) =>
             query: input.query,
             documents: input.documents,
             topN: input.topN,
-            model: modelForFeature("reranking", policy),
+            model: modelForFeature("embeddings", policy),
             maxRetries: 0,
           }),
       } satisfies StructuredAiServiceShape;

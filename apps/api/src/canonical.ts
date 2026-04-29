@@ -1,29 +1,35 @@
 import {
+  type AiModelPolicy,
   aiJobTypesForModel,
   canPublishPublicAiOutput,
   canUseInAggregateLabels,
-  type AiModelPolicy,
   modelPolicy,
 } from "@news/ai";
 import { api, toStoryDetailProjection, toStoryProjection } from "@news/convex";
 import {
   aiJobs,
   aiResults,
+  appendAiJobEvent,
+  appendAiJobEvents,
   articles,
   claims,
   createDb,
-  entities,
   sourceRatings,
   stories,
 } from "@news/db";
 import {
+  type AiJobType,
+  type AiResultEnvelope,
   type ArticleExtractionQaOutput,
   type BiasContextOutput,
   type ClaimExtractionOutput,
   type FactualityReliabilitySupportOutput,
+  type LeasedAiJob,
   type OwnershipExtractionSupportOutput,
+  type SafetyComplianceJobPayload,
   type SafetyComplianceOutput,
   type StorySummary,
+  type StorySummaryOutput,
   articleExtractionQaJobPayloadSchema,
   claimExtractionJobPayloadSchema,
   decodeUnknownSync,
@@ -32,14 +38,9 @@ import {
   shouldTreatArticleExtractionAsValid,
   sourceAnalysisJobPayloadSchema,
   storyClusteringSupportJobPayloadSchema,
-  type AiJobType,
-  type AiResultEnvelope,
-  type LeasedAiJob,
-  type SafetyComplianceJobPayload,
-  type StorySummaryOutput,
 } from "@news/types";
-import { and, asc, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { ConvexHttpClient } from "convex/browser";
+import { and, asc, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { Data, DateTime, Effect } from "effect";
 import { makePostgresRepository } from "./repository";
 
@@ -112,19 +113,21 @@ const currentDate = DateTime.now.pipe(Effect.map(DateTime.toDateUtc));
 
 const currentIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 
-const normalizeEntityKey = (value: string) =>
-  value
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-
 type PersistedAiResultOutcome = {
   readonly jobType: AiJobType;
+  readonly attemptNumber: number;
   readonly rebuildStories: boolean;
   readonly queueProjectionSync: boolean;
   readonly safetyJobPayload?: SafetyComplianceJobPayload;
 };
+
+const logAiJobEvent = (
+  db: ReturnType<typeof createDb>,
+  input: Parameters<typeof appendAiJobEvent>[1],
+) =>
+  tryCanonical(`Failed to log AI job event ${input.eventType}`, () =>
+    appendAiJobEvent(db, input),
+  );
 
 const toMutableStoryProjection = (
   story: ReturnType<typeof toStoryProjection>,
@@ -134,16 +137,14 @@ const toMutableStoryProjection = (
   topicTags: string[];
   firstSeenAt: string;
   lastSeenAt: string;
-  summary:
-    | {
-        neutralSummary: string;
-        agreed: string[];
-        differs: string[];
-        contestedOrUnverified: string[];
-        confidence: number;
-        lastUpdatedAt: string;
-      }
-    | null;
+  summary: {
+    neutralSummary: string;
+    agreed: string[];
+    differs: string[];
+    contestedOrUnverified: string[];
+    confidence: number;
+    lastUpdatedAt: string;
+  } | null;
   coverage: {
     byCountry: Record<string, number>;
     byLanguage: Record<string, number>;
@@ -182,16 +183,14 @@ const toMutableStoryDetailProjection = (
     topicTags: string[];
     firstSeenAt: string;
     lastSeenAt: string;
-    summary:
-      | {
-          neutralSummary: string;
-          agreed: string[];
-          differs: string[];
-          contestedOrUnverified: string[];
-          confidence: number;
-          lastUpdatedAt: string;
-        }
-      | null;
+    summary: {
+      neutralSummary: string;
+      agreed: string[];
+      differs: string[];
+      contestedOrUnverified: string[];
+      confidence: number;
+      lastUpdatedAt: string;
+    } | null;
     coverage: {
       byCountry: Record<string, number>;
       byLanguage: Record<string, number>;
@@ -273,7 +272,10 @@ export const leaseAiJobFromCanonicalStore = (
                 : undefined,
               or(
                 eq(aiJobs.status, "pending"),
-                and(eq(aiJobs.status, "leased"), lt(aiJobs.leaseExpiresAt, now)),
+                and(
+                  eq(aiJobs.status, "leased"),
+                  lt(aiJobs.leaseExpiresAt, now),
+                ),
               ),
             ),
           )
@@ -320,6 +322,19 @@ export const leaseAiJobFromCanonicalStore = (
     }
 
     if (!job) return null;
+
+    yield* logAiJobEvent(db, {
+      jobId: job.id,
+      attemptNumber: job.attempts,
+      eventType: "leased",
+      message: "AI job leased to runner",
+      details: {
+        nodeId: input.nodeId,
+        requestedModel: input.model ?? null,
+        leaseExpiresAt: leaseExpiresAt.toISOString(),
+      },
+      createdAt: now,
+    });
 
     switch (job.type) {
       case "article_extraction_qa":
@@ -383,15 +398,29 @@ export const persistAiResultToCanonicalStore = (
 ): Effect.Effect<PersistedAiResultOutcome, CanonicalStoreError> =>
   Effect.gen(function* () {
     const db = createDb(databaseUrl);
-    const createdAt = DateTime.toDateUtc(DateTime.makeUnsafe(result.created_at));
-    const [job] = yield* tryCanonical(`Failed to load AI job ${result.job_id}`, () =>
-      db.select().from(aiJobs).where(eq(aiJobs.id, result.job_id)).limit(1),
+    const createdAt = DateTime.toDateUtc(
+      DateTime.makeUnsafe(result.created_at),
+    );
+    const [job] = yield* tryCanonical(
+      `Failed to load AI job ${result.job_id}`,
+      () =>
+        db.select().from(aiJobs).where(eq(aiJobs.id, result.job_id)).limit(1),
     );
     if (!job) {
       return yield* new CanonicalStoreError({
         message: `AI job ${result.job_id} was not found`,
       });
     }
+    const existingResultRows = yield* tryCanonical(
+      `Failed to load existing AI result for ${result.job_id}`,
+      () =>
+        db
+          .select({ id: aiResults.id })
+          .from(aiResults)
+          .where(eq(aiResults.jobId, result.job_id))
+          .limit(1),
+    );
+    const hasExistingResult = existingResultRows.length > 0;
     const aiResultRow: typeof aiResults.$inferInsert = {
       jobId: result.job_id,
       modelName: result.model_name,
@@ -408,28 +437,81 @@ export const persistAiResultToCanonicalStore = (
       createdAt,
     };
 
-    yield* tryCanonical(`Failed to persist AI result ${result.job_id}`, () =>
-      db.insert(aiResults).values(aiResultRow),
-    );
+    if (!hasExistingResult) {
+      yield* tryCanonical(`Failed to persist AI result ${result.job_id}`, () =>
+        db.insert(aiResults).values(aiResultRow),
+      );
 
-    yield* tryCanonical(`Failed to update AI job ${result.job_id}`, () =>
-      db
-        .update(aiJobs)
-        .set({
-          status:
-            result.validation_status === "valid"
-              ? "completed"
-              : "failed_schema_validation",
-          leasedBy: null,
-          leaseExpiresAt: null,
-          lastError:
-            result.validation_status === "valid"
-              ? null
-              : `validation:${result.validation_status}`,
-          updatedAt: createdAt,
-        })
-        .where(eq(aiJobs.id, result.job_id)),
-    );
+      yield* tryCanonical(`Failed to update AI job ${result.job_id}`, () =>
+        db
+          .update(aiJobs)
+          .set({
+            status:
+              result.validation_status === "valid"
+                ? "completed"
+                : "failed_schema_validation",
+            leasedBy: null,
+            leaseExpiresAt: null,
+            lastError:
+              result.validation_status === "valid"
+                ? null
+                : `validation:${result.validation_status}`,
+            updatedAt: createdAt,
+          })
+          .where(eq(aiJobs.id, result.job_id)),
+      );
+
+      yield* tryCanonical(
+        `Failed to log AI result lifecycle ${result.job_id}`,
+        () =>
+          appendAiJobEvents(db, [
+            {
+              jobId: result.job_id,
+              attemptNumber: job.attempts,
+              eventType: "result_persisted",
+              message: "AI result persisted",
+              details: {
+                modelName: result.model_name,
+                promptVersion: result.prompt_version,
+                validationStatus: result.validation_status,
+                confidence: result.confidence,
+                latencyMs: result.latency_ms,
+              },
+              createdAt,
+            },
+            {
+              jobId: result.job_id,
+              attemptNumber: job.attempts,
+              level: result.validation_status === "valid" ? "info" : "warn",
+              eventType:
+                result.validation_status === "valid"
+                  ? "completed"
+                  : "failed_schema_validation",
+              message:
+                result.validation_status === "valid"
+                  ? "AI job completed"
+                  : "AI job failed schema validation",
+              details: {
+                validationStatus: result.validation_status,
+              },
+              createdAt,
+            },
+          ]),
+      );
+    } else {
+      yield* logAiJobEvent(db, {
+        jobId: result.job_id,
+        attemptNumber: job.attempts,
+        level: "warn",
+        eventType: "duplicate_result_ignored",
+        message: "Duplicate AI result submission ignored",
+        details: {
+          validationStatus: result.validation_status,
+          createdAt: result.created_at,
+        },
+        createdAt,
+      });
+    }
 
     if (result.validation_status !== "valid") {
       if (job.type === "neutral_story_summary") {
@@ -445,6 +527,7 @@ export const persistAiResultToCanonicalStore = (
       }
       return {
         jobType: job.type,
+        attemptNumber: job.attempts,
         rebuildStories:
           job.type !== "neutral_story_summary" &&
           job.type !== "safety_compliance_check",
@@ -461,6 +544,7 @@ export const persistAiResultToCanonicalStore = (
         if (!isArticleExtractionQaOutput(structuredOutput)) {
           return {
             jobType: job.type,
+            attemptNumber: job.attempts,
             rebuildStories: false,
             queueProjectionSync: false,
           };
@@ -486,6 +570,7 @@ export const persistAiResultToCanonicalStore = (
         );
         return {
           jobType: job.type,
+          attemptNumber: job.attempts,
           rebuildStories: true,
           queueProjectionSync: false,
         };
@@ -495,13 +580,17 @@ export const persistAiResultToCanonicalStore = (
         if (!isClaimExtractionOutput(structuredOutput)) {
           return {
             jobType: job.type,
+            attemptNumber: job.attempts,
             rebuildStories: false,
             queueProjectionSync: false,
           };
         }
         yield* tryCanonical(
           `Failed to reset claims for article ${payload.article.articleId}`,
-          () => db.delete(claims).where(eq(claims.articleId, payload.article.articleId)),
+          () =>
+            db
+              .delete(claims)
+              .where(eq(claims.articleId, payload.article.articleId)),
         );
         if (structuredOutput.claims.length > 0) {
           yield* tryCanonical(
@@ -520,6 +609,7 @@ export const persistAiResultToCanonicalStore = (
         }
         return {
           jobType: job.type,
+          attemptNumber: job.attempts,
           rebuildStories: true,
           queueProjectionSync: false,
         };
@@ -527,12 +617,14 @@ export const persistAiResultToCanonicalStore = (
       case "story_clustering_support":
         return {
           jobType: job.type,
+          attemptNumber: job.attempts,
           rebuildStories: true,
           queueProjectionSync: false,
         };
       case "semantic_story_clustering_support":
         return {
           jobType: job.type,
+          attemptNumber: job.attempts,
           rebuildStories: false,
           queueProjectionSync: false,
         };
@@ -559,21 +651,30 @@ export const persistAiResultToCanonicalStore = (
           publishedAt: existing?.publishedAt ?? null,
         };
 
-        if (job.type === "bias_context_classification" && isBiasContextOutput(structuredOutput)) {
+        if (
+          job.type === "bias_context_classification" &&
+          isBiasContextOutput(structuredOutput)
+        ) {
           if (structuredOutput.publishable && publishable) {
             next.taxonomyBucket = structuredOutput.taxonomy_bucket;
             next.publishedAt = createdAt;
           }
         }
 
-        if (job.type === "factuality_reliability_support" && isFactualityOutput(structuredOutput)) {
+        if (
+          job.type === "factuality_reliability_support" &&
+          isFactualityOutput(structuredOutput)
+        ) {
           if (publishable) {
             next.reliabilityBand = structuredOutput.reliability_band;
             next.publishedAt = next.publishedAt ?? createdAt;
           }
         }
 
-        if (job.type === "ownership_extraction_support" && isOwnershipOutput(structuredOutput)) {
+        if (
+          job.type === "ownership_extraction_support" &&
+          isOwnershipOutput(structuredOutput)
+        ) {
           if (structuredOutput.publishable && publishable) {
             next.ownershipCategory = structuredOutput.ownership_category;
             next.evidence = structuredOutput.citations.map((url) => ({
@@ -600,6 +701,7 @@ export const persistAiResultToCanonicalStore = (
         );
         return {
           jobType: job.type,
+          attemptNumber: job.attempts,
           rebuildStories: true,
           queueProjectionSync: false,
         };
@@ -609,12 +711,14 @@ export const persistAiResultToCanonicalStore = (
         if (!isStorySummaryOutput(structuredOutput)) {
           return {
             jobType: job.type,
+            attemptNumber: job.attempts,
             rebuildStories: false,
             queueProjectionSync: false,
           };
         }
         return {
           jobType: job.type,
+          attemptNumber: job.attempts,
           rebuildStories: false,
           queueProjectionSync: false,
           safetyJobPayload: canPublishPublicAiOutput(result.confidence)
@@ -632,6 +736,7 @@ export const persistAiResultToCanonicalStore = (
         if (!isSafetyOutput(structuredOutput)) {
           return {
             jobType: job.type,
+            attemptNumber: job.attempts,
             rebuildStories: false,
             queueProjectionSync: true,
           };
@@ -671,6 +776,7 @@ export const persistAiResultToCanonicalStore = (
         }
         return {
           jobType: job.type,
+          attemptNumber: job.attempts,
           rebuildStories: false,
           queueProjectionSync: true,
         };
@@ -685,24 +791,74 @@ export const enqueueSafetyComplianceJob = (
   Effect.gen(function* () {
     const db = createDb(databaseUrl);
     const now = yield* currentDate;
+    const [existingJob] = yield* tryCanonical(
+      `Failed to check existing safety compliance job for story ${input.storyId}`,
+      () =>
+        db
+          .select({ id: aiJobs.id })
+          .from(aiJobs)
+          .where(
+            and(
+              eq(aiJobs.type, "safety_compliance_check"),
+              inArray(aiJobs.status, ["pending", "leased", "completed"]),
+              sql`${aiJobs.payload}->>'storyId' = ${input.storyId}`,
+            ),
+          )
+          .orderBy(desc(aiJobs.createdAt))
+          .limit(1),
+    );
 
-    yield* tryCanonical(
+    if (existingJob) {
+      yield* logAiJobEvent(db, {
+        jobId: existingJob.id,
+        attemptNumber: 0,
+        level: "warn",
+        eventType: "duplicate_enqueue_ignored",
+        message: "Skipped duplicate safety compliance enqueue",
+        details: {
+          storyId: input.storyId,
+        },
+        createdAt: now,
+      });
+      return;
+    }
+
+    const [job] = yield* tryCanonical(
       `Failed to enqueue safety compliance job for story ${input.storyId}`,
       () =>
-        db.insert(aiJobs).values({
-          type: "safety_compliance_check",
-          status: "pending",
-          priority: 5,
-          payload: input,
-          inputArtifactIds: [input.storyId, ...input.articles.map((article) => article.id)],
-          leasedBy: null,
-          leaseExpiresAt: null,
-          attempts: 0,
-          lastError: null,
-          createdAt: now,
-          updatedAt: now,
-        }),
+        db
+          .insert(aiJobs)
+          .values({
+            type: "safety_compliance_check",
+            status: "pending",
+            priority: 5,
+            payload: input,
+            inputArtifactIds: [
+              input.storyId,
+              ...input.articles.map((article) => article.id),
+            ],
+            leasedBy: null,
+            leaseExpiresAt: null,
+            attempts: 0,
+            lastError: null,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning({ id: aiJobs.id }),
     );
+
+    if (job) {
+      yield* logAiJobEvent(db, {
+        jobId: job.id,
+        attemptNumber: 0,
+        eventType: "queued",
+        message: "Safety compliance job queued from summary result",
+        details: {
+          storyId: input.storyId,
+        },
+        createdAt: now,
+      });
+    }
   });
 
 export const failAiJobInCanonicalStore = (
@@ -728,6 +884,23 @@ export const failAiJobInCanonicalStore = (
         })
         .where(eq(aiJobs.id, input.jobId)),
     );
+
+    const [job] = yield* tryCanonical(
+      `Failed to load AI job ${input.jobId} after failure`,
+      () => db.select().from(aiJobs).where(eq(aiJobs.id, input.jobId)).limit(1),
+    );
+
+    yield* logAiJobEvent(db, {
+      jobId: input.jobId,
+      attemptNumber: job?.attempts ?? 0,
+      level: "error",
+      eventType: "runner_failed",
+      message: "AI runner marked job as failed",
+      details: {
+        error: input.error,
+      },
+      createdAt: now,
+    });
   });
 
 export const syncCanonicalStoriesToConvex = (input: {
@@ -772,7 +945,9 @@ export const syncCanonicalStoriesToConvex = (input: {
           toMutableStoryProjection(toStoryProjection(story, syncedAt)),
         ),
         details: details
-          .filter((detail): detail is NonNullable<typeof detail> => detail !== null)
+          .filter(
+            (detail): detail is NonNullable<typeof detail> => detail !== null,
+          )
           .map((detail) =>
             toMutableStoryDetailProjection(
               toStoryDetailProjection(detail, syncedAt),

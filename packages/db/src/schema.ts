@@ -54,6 +54,12 @@ export const aiJobStatus = pgEnum("ai_job_status", [
   "failed_schema_validation",
 ]);
 
+export const aiJobEventLevel = pgEnum("ai_job_event_level", [
+  "info",
+  "warn",
+  "error",
+]);
+
 export const taxonomyBucket = pgEnum("taxonomy_bucket", [
   "left",
   "center_left",
@@ -353,6 +359,34 @@ export const aiResults = pgTable("ai_results", {
     .defaultNow()
     .notNull(),
 });
+
+export const aiJobEvents = pgTable(
+  "ai_job_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    jobId: uuid("job_id")
+      .references(() => aiJobs.id)
+      .notNull(),
+    attemptNumber: integer("attempt_number").default(0).notNull(),
+    level: aiJobEventLevel("level").default("info").notNull(),
+    eventType: text("event_type").notNull(),
+    message: text("message").notNull(),
+    details: jsonb("details")
+      .$type<Record<string, unknown>>()
+      .default({})
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    jobAttemptIdx: index("ai_job_events_job_attempt_idx").on(
+      table.jobId,
+      table.attemptNumber,
+      table.createdAt,
+    ),
+  }),
+);
 
 export const taxonomies = pgTable(
   "taxonomies",

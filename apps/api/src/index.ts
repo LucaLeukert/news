@@ -1,3 +1,6 @@
+import { StructuredAiLive, resolveModelPolicy } from "@news/ai";
+import { appendAiJobEvent, createDb } from "@news/db";
+import { type ServerEnv, loadServerEnv } from "@news/env";
 import {
   AuthService,
   MetricsService,
@@ -5,7 +8,6 @@ import {
   NewsRpcs,
   makeAppLayer,
 } from "@news/platform";
-import { type ServerEnv, loadServerEnv } from "@news/env";
 import {
   type AiResultEnvelope,
   type CrawlEnqueueRequest,
@@ -16,19 +18,20 @@ import {
   storyListQuerySchema,
   storySchema,
 } from "@news/types";
-import { StructuredAiLive, resolveModelPolicy } from "@news/ai";
 import { Context, Data, DateTime, Effect, Layer, Option } from "effect";
 import * as Headers from "effect/unstable/http/Headers";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
+import { rebuildStoriesAndQueueAiJobs } from "../../../services/crawler/src/pipeline";
 import {
-  FixtureNewsRepositoryLive,
-  NewsRepository,
-  PostgresNewsRepositoryLive,
-  makeFixtureRepository,
-} from "./repository";
+  getAdminAiJobDetail,
+  ingestAdminArticleUrls,
+  listAdminAiJobs,
+  loadOperationsSnapshot,
+  runAdminFailedVerificationReingest,
+} from "./admin";
 import {
   enqueueSafetyComplianceJob,
   failAiJobInCanonicalStore,
@@ -36,8 +39,12 @@ import {
   persistAiResultToCanonicalStore,
   syncCanonicalStoriesToConvex,
 } from "./canonical";
-import { loadOperationsSnapshot } from "./admin";
-import { rebuildStoriesAndQueueAiJobs } from "../../../services/crawler/src/pipeline";
+import {
+  FixtureNewsRepositoryLive,
+  NewsRepository,
+  PostgresNewsRepositoryLive,
+  makeFixtureRepository,
+} from "./repository";
 
 export interface Env {
   DATABASE_URL?: string;
@@ -137,6 +144,32 @@ function requireRpcInternalAuth(headers: Headers.Headers, env: Env) {
   );
 }
 
+const rpcRequestFromHeaders = (headers: Headers.Headers) =>
+  new Request("https://coverage-lens-admin.local/rpc", {
+    headers: new globalThis.Headers({ ...headers }),
+  });
+
+const authorizeAdminRpc = (headers: Headers.Headers, env: Env) =>
+  Effect.gen(function* () {
+    if (requireRpcInternalAuth(headers, env)) {
+      return;
+    }
+
+    const auth = yield* AuthService;
+    const identity = yield* auth
+      .getIdentityFromRequest(rpcRequestFromHeaders(headers))
+      .pipe(
+        Effect.catchIf(
+          () => true,
+          () => Effect.succeed({ userId: null, orgId: null, sessionId: null }),
+        ),
+      );
+
+    if (!identity.userId) {
+      return yield* Effect.fail(unauthorizedRpcError("Unauthorized admin RPC"));
+    }
+  });
+
 const toRpcError = (error: unknown): NewsRpcError => ({
   message: error instanceof Error ? error.message : "RPC request failed",
 });
@@ -183,12 +216,6 @@ const enqueue = (queue: Queue | undefined, body: QueueMessage) =>
   });
 
 const nowIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
-
-const isoAfter = (duration: Parameters<typeof DateTime.addDuration>[1]) =>
-  DateTime.now.pipe(
-    Effect.map((now) => DateTime.addDuration(now, duration)),
-    Effect.map(DateTime.formatIso),
-  );
 
 const getIdentity = (request: HttpServerRequest.HttpServerRequest) =>
   Effect.gen(function* () {
@@ -242,19 +269,80 @@ const makeRpcHandlersLayer = (env: Env) =>
           }).pipe(Effect.mapError(toRpcError)),
         GetOperationsSnapshot: (_payload, options) =>
           Effect.gen(function* () {
-            if (!requireRpcInternalAuth(options.headers, env)) {
-              return yield* Effect.fail(
-                unauthorizedRpcError("Unauthorized RPC operations snapshot"),
-              );
-            }
+            yield* authorizeAdminRpc(options.headers, env);
             if (!env.DATABASE_URL) {
               return yield* Effect.fail(
-                unauthorizedRpcError("DATABASE_URL is required for operations snapshot"),
+                unauthorizedRpcError(
+                  "DATABASE_URL is required for operations snapshot",
+                ),
               );
             }
             return yield* loadOperationsSnapshot({
               databaseUrl: env.DATABASE_URL,
               convexUrl: env.NEXT_PUBLIC_CONVEX_URL,
+            }).pipe(Effect.mapError(toRpcError));
+          }).pipe(Effect.mapError(toRpcError)),
+        ListAdminAiJobs: (payload, options) =>
+          Effect.gen(function* () {
+            yield* authorizeAdminRpc(options.headers, env);
+            if (!env.DATABASE_URL) {
+              return yield* Effect.fail(
+                unauthorizedRpcError(
+                  "DATABASE_URL is required for AI job list",
+                ),
+              );
+            }
+            return yield* listAdminAiJobs({
+              databaseUrl: env.DATABASE_URL,
+              limit: payload.limit,
+            }).pipe(Effect.mapError(toRpcError));
+          }).pipe(Effect.mapError(toRpcError)),
+        GetAdminAiJobDetail: ({ jobId }, options) =>
+          Effect.gen(function* () {
+            yield* authorizeAdminRpc(options.headers, env);
+            if (!env.DATABASE_URL) {
+              return yield* Effect.fail(
+                unauthorizedRpcError(
+                  "DATABASE_URL is required for AI job detail",
+                ),
+              );
+            }
+            return yield* getAdminAiJobDetail({
+              databaseUrl: env.DATABASE_URL,
+              jobId,
+            }).pipe(Effect.mapError(toRpcError));
+          }).pipe(Effect.mapError(toRpcError)),
+        ReingestFailedVerification: (payload, options) =>
+          Effect.gen(function* () {
+            yield* authorizeAdminRpc(options.headers, env);
+            if (!env.DATABASE_URL) {
+              return yield* Effect.fail(
+                unauthorizedRpcError(
+                  "DATABASE_URL is required for failed verification reingest",
+                ),
+              );
+            }
+            return yield* runAdminFailedVerificationReingest({
+              databaseUrl: env.DATABASE_URL,
+              statuses: payload.statuses,
+              sourceDomain: payload.sourceDomain,
+              limit: payload.limit,
+              overrideTitleMismatches: payload.overrideTitleMismatches,
+            }).pipe(Effect.mapError(toRpcError));
+          }).pipe(Effect.mapError(toRpcError)),
+        ManualArticleIntake: (payload, options) =>
+          Effect.gen(function* () {
+            yield* authorizeAdminRpc(options.headers, env);
+            if (!env.DATABASE_URL) {
+              return yield* Effect.fail(
+                unauthorizedRpcError(
+                  "DATABASE_URL is required for manual article intake",
+                ),
+              );
+            }
+            return yield* ingestAdminArticleUrls({
+              databaseUrl: env.DATABASE_URL,
+              urls: payload.urls,
             }).pipe(Effect.mapError(toRpcError));
           }).pipe(Effect.mapError(toRpcError)),
         ResolveUrl: ({ url }) =>
@@ -477,16 +565,11 @@ const makeRpcRoutesLayer = (env: Env) =>
         disableTracing: true,
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(
-            makeRpcHandlersLayer(env),
-            RpcSerialization.layerJson,
-          ),
+          Layer.mergeAll(makeRpcHandlersLayer(env), RpcSerialization.layerJson),
         ),
       );
 
-      return Layer.mergeAll(
-        HttpRouter.add("POST", "/rpc", rpcHandler),
-      );
+      return Layer.mergeAll(HttpRouter.add("POST", "/rpc", rpcHandler));
     }),
   );
 
@@ -510,7 +593,8 @@ function runtimeEnv(env: Env) {
     AI_MODEL_LOCAL_TEST_CLASSIFICATION: env.AI_MODEL_LOCAL_TEST_CLASSIFICATION,
     AI_MODEL_LOCAL_TEST_EMBEDDINGS: env.AI_MODEL_LOCAL_TEST_EMBEDDINGS,
     AI_MODEL_LOCAL_TEST_RERANKING: env.AI_MODEL_LOCAL_TEST_RERANKING,
-    AI_MODEL_LOCAL_TEST_EDITORIAL_REVIEW: env.AI_MODEL_LOCAL_TEST_EDITORIAL_REVIEW,
+    AI_MODEL_LOCAL_TEST_EDITORIAL_REVIEW:
+      env.AI_MODEL_LOCAL_TEST_EDITORIAL_REVIEW,
     AI_MODEL_LOCAL_TEST_PUBLIC_SUMMARY: env.AI_MODEL_LOCAL_TEST_PUBLIC_SUMMARY,
     NEXT_PUBLIC_CONVEX_URL: env.NEXT_PUBLIC_CONVEX_URL,
     INTERNAL_SERVICE_TOKEN: env.INTERNAL_SERVICE_TOKEN,
@@ -623,10 +707,45 @@ export default {
                 body.result,
               );
               if (outcome.rebuildStories) {
-                yield* rebuildStoriesAndQueueAiJobs(env.DATABASE_URL as string, {
-                  aiModelPolicy: resolveModelPolicy(parsedEnv),
-                  includeClusteringSupportJobs: false,
-                });
+                yield* rebuildStoriesAndQueueAiJobs(
+                  env.DATABASE_URL as string,
+                  {
+                    aiModelPolicy: resolveModelPolicy(parsedEnv),
+                    includeClusteringSupportJobs: false,
+                  },
+                ).pipe(
+                  Effect.catchIf(
+                    () => true,
+                    (error: unknown) =>
+                      Effect.gen(function* () {
+                        const db = createDb(env.DATABASE_URL as string);
+                        yield* Effect.tryPromise({
+                          try: () =>
+                            appendAiJobEvent(db, {
+                              jobId: body.result.job_id,
+                              attemptNumber: outcome.attemptNumber,
+                              level: "error",
+                              eventType: "story_rebuild_failed",
+                              message:
+                                "AI result post-processing failed while rebuilding stories",
+                              details: {
+                                error:
+                                  error instanceof Error
+                                    ? error.message
+                                    : String(error),
+                              },
+                            }),
+                          catch: (cause) =>
+                            new ApiRequestError({
+                              message:
+                                "Failed to append AI rebuild failure event",
+                              cause,
+                            }),
+                        }).pipe(Effect.ignore);
+                        return yield* Effect.fail(error);
+                      }),
+                  ),
+                );
               }
               if (outcome.safetyJobPayload) {
                 yield* enqueueSafetyComplianceJob(

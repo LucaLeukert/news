@@ -225,12 +225,8 @@
           "name": "ai_results_job_id_ai_jobs_id_fk",
           "tableFrom": "ai_results",
           "tableTo": "ai_jobs",
-          "columnsFrom": [
-            "job_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["job_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -291,12 +287,8 @@
           "name": "article_versions_article_id_articles_id_fk",
           "tableFrom": "article_versions",
           "tableTo": "articles",
-          "columnsFrom": [
-            "article_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["article_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -439,12 +431,8 @@
           "name": "articles_source_id_sources_id_fk",
           "tableFrom": "articles",
           "tableTo": "sources",
-          "columnsFrom": [
-            "source_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["source_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -504,12 +492,8 @@
           "name": "claims_article_id_articles_id_fk",
           "tableFrom": "claims",
           "tableTo": "articles",
-          "columnsFrom": [
-            "article_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["article_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -597,12 +581,8 @@
           "name": "crawl_artifacts_crawl_job_id_crawl_jobs_id_fk",
           "tableFrom": "crawl_artifacts",
           "tableTo": "crawl_jobs",
-          "columnsFrom": [
-            "crawl_job_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["crawl_job_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -733,12 +713,8 @@
           "name": "crawl_jobs_source_id_sources_id_fk",
           "tableFrom": "crawl_jobs",
           "tableTo": "sources",
-          "columnsFrom": [
-            "source_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["source_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -746,12 +722,8 @@
           "name": "crawl_jobs_feed_id_source_feeds_id_fk",
           "tableFrom": "crawl_jobs",
           "tableTo": "source_feeds",
-          "columnsFrom": [
-            "feed_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["feed_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -873,12 +845,8 @@
           "name": "source_feeds_source_id_sources_id_fk",
           "tableFrom": "source_feeds",
           "tableTo": "sources",
-          "columnsFrom": [
-            "source_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["source_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -959,12 +927,8 @@
           "name": "source_ratings_source_id_sources_id_fk",
           "tableFrom": "source_ratings",
           "tableTo": "sources",
-          "columnsFrom": [
-            "source_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["source_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1241,12 +1205,8 @@
           "name": "story_articles_story_id_stories_id_fk",
           "tableFrom": "story_articles",
           "tableTo": "stories",
-          "columnsFrom": [
-            "story_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["story_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1254,12 +1214,8 @@
           "name": "story_articles_article_id_articles_id_fk",
           "tableFrom": "story_articles",
           "tableTo": "articles",
-          "columnsFrom": [
-            "article_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["article_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1267,10 +1223,7 @@
       "compositePrimaryKeys": {
         "story_articles_story_id_article_id_pk": {
           "name": "story_articles_story_id_article_id_pk",
-          "columns": [
-            "story_id",
-            "article_id"
-          ]
+          "columns": ["story_id", "article_id"]
         }
       },
       "uniqueConstraints": {},
@@ -1307,12 +1260,8 @@
           "name": "story_entities_story_id_stories_id_fk",
           "tableFrom": "story_entities",
           "tableTo": "stories",
-          "columnsFrom": [
-            "story_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["story_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1320,12 +1269,8 @@
           "name": "story_entities_entity_id_entities_id_fk",
           "tableFrom": "story_entities",
           "tableTo": "entities",
-          "columnsFrom": [
-            "entity_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["entity_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1333,10 +1278,7 @@
       "compositePrimaryKeys": {
         "story_entities_story_id_entity_id_pk": {
           "name": "story_entities_story_id_entity_id_pk",
-          "columns": [
-            "story_id",
-            "entity_id"
-          ]
+          "columns": ["story_id", "entity_id"]
         }
       },
       "uniqueConstraints": {},
@@ -1403,12 +1345,8 @@
           "name": "story_metrics_story_id_stories_id_fk",
           "tableFrom": "story_metrics",
           "tableTo": "stories",
-          "columnsFrom": [
-            "story_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["story_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }

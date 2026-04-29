@@ -1,19 +1,23 @@
+import type { AiModelPolicy } from "@news/ai";
 import {
-  decodeHtmlEntities,
   type FeedItem,
+  decodeHtmlEntities,
   validateFeedItemAgainstPage,
 } from "@news/crawler-core";
-import type { AiModelPolicy } from "@news/ai";
 import { articleVersions, articles, createDb, sources } from "@news/db";
 import { HttpService, MetricsService } from "@news/platform";
-import { type CrawlValidationState, USER_AGENT, normalizeUrl } from "@news/types";
+import {
+  type CrawlValidationState,
+  USER_AGENT,
+  normalizeUrl,
+} from "@news/types";
 import { and, desc, eq, inArray } from "drizzle-orm";
-import { DateTime, Effect } from "effect";
+import { Data, DateTime, Effect } from "effect";
 import { parseArticleWithNewspaper } from "./article-metadata";
 import {
+  type IngestedFeedItem,
   enqueueArticleAndSourceAiJobsBySource,
   rebuildStoriesAndQueueAiJobs,
-  type IngestedFeedItem,
 } from "./pipeline";
 
 export type ReingestFailedVerificationInput = {
@@ -23,6 +27,11 @@ export type ReingestFailedVerificationInput = {
   readonly overrideTitleMismatches?: boolean;
   readonly aiModelPolicy?: AiModelPolicy;
 };
+
+class ReingestError extends Data.TaggedError("ReingestError")<{
+  readonly message: string;
+  readonly cause?: unknown;
+}> {}
 
 const DEFAULT_REINGEST_STATUSES = [
   "rss_mismatch_title",
@@ -53,7 +62,8 @@ const normalizeReingestStatuses = (
   return normalized.length > 0 ? normalized : [...DEFAULT_REINGEST_STATUSES];
 };
 
-const toOptionalString = (value: string | null | undefined) => value ?? undefined;
+const toOptionalString = (value: string | null | undefined) =>
+  value ?? undefined;
 
 const toNullableDate = (value: string | null | undefined) =>
   value ? DateTime.toDateUtc(DateTime.makeUnsafe(value)) : null;
@@ -69,6 +79,9 @@ const snippetFromDescription = (
   const clean = description.replace(/\s+/g, " ").trim();
   return clean.length > 500 ? clean.slice(0, 500) : clean;
 };
+
+const reingestError = (message: string, cause?: unknown) =>
+  new ReingestError({ message, cause });
 
 export const reingestFailedVerificationArticles = (
   databaseUrl: string,
@@ -102,8 +115,9 @@ export const reingestFailedVerificationArticles = (
           .orderBy(desc(articles.updatedAt), desc(articles.createdAt))
           .limit(limit),
       catch: (cause) =>
-        new Error(
-          `Failed to load failed-verification articles for reingest: ${String(cause)}`,
+        reingestError(
+          "Failed to load failed-verification articles for reingest",
+          cause,
         ),
     });
 
@@ -133,8 +147,9 @@ export const reingestFailedVerificationArticles = (
           )
           .orderBy(desc(articleVersions.capturedAt)),
       catch: (cause) =>
-        new Error(
-          `Failed to load article versions for failed-verification reingest: ${String(cause)}`,
+        reingestError(
+          "Failed to load article versions for failed-verification reingest",
+          cause,
         ),
     });
 
@@ -148,8 +163,8 @@ export const reingestFailedVerificationArticles = (
 
     for (const row of versionRows) {
       if (latestFeedMetadata.has(row.articleId)) continue;
-      const feedTitle = row.metadata["feedTitle"];
-      const feedPublishedAt = row.metadata["feedPublishedAt"];
+      const feedTitle = row.metadata.feedTitle;
+      const feedPublishedAt = row.metadata.feedPublishedAt;
       if (typeof feedTitle !== "string" || feedTitle.trim().length === 0) {
         continue;
       }
@@ -206,7 +221,10 @@ export const reingestFailedVerificationArticles = (
                   description: parsed.description,
                 },
                 validationState,
-              } satisfies Pick<IngestedFeedItem, "metadata" | "validationState">;
+              } satisfies Pick<
+                IngestedFeedItem,
+                "metadata" | "validationState"
+              >;
             }),
           ),
           Effect.catchIf(
@@ -264,22 +282,23 @@ export const reingestFailedVerificationArticles = (
               snippet: nextSnippet,
               author: outcome.metadata
                 ? toOptionalString(outcome.metadata.author)
-                : candidate.article.author ?? undefined,
+                : (candidate.article.author ?? undefined),
               publishedAt: outcome.metadata
                 ? toOptionalDate(outcome.metadata.publishedAt)
-                : candidate.article.publishedAt ?? undefined,
+                : (candidate.article.publishedAt ?? undefined),
               updatedAt: now,
               language: outcome.metadata
                 ? toOptionalString(outcome.metadata.language)
-                : candidate.article.language ?? undefined,
+                : (candidate.article.language ?? undefined),
               paywalled:
                 outcome.metadata?.paywalled ?? candidate.article.paywalled,
               crawlStatus: effectiveValidationState,
             })
             .where(eq(articles.id, candidate.article.id)),
         catch: (cause) =>
-          new Error(
-            `Failed to update article ${candidate.article.id} during reingest: ${String(cause)}`,
+          reingestError(
+            `Failed to update article ${candidate.article.id} during reingest`,
+            cause,
           ),
       });
 
@@ -303,8 +322,9 @@ export const reingestFailedVerificationArticles = (
             capturedAt: now,
           }),
         catch: (cause) =>
-          new Error(
-            `Failed to capture article version for ${candidate.article.id} during reingest: ${String(cause)}`,
+          reingestError(
+            `Failed to capture article version for ${candidate.article.id} during reingest`,
+            cause,
           ),
       });
 

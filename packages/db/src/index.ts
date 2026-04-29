@@ -1,9 +1,10 @@
-import { makeDbEnv } from "@news/env";
 import { neon } from "@neondatabase/serverless";
+import { makeDbEnv } from "@news/env";
 import { drizzle } from "drizzle-orm/neon-http";
 import * as schema from "./schema";
 
 export * from "./schema";
+export * from "./ai-job-events";
 
 export function createDb(databaseUrl: string) {
   const env = makeDbEnv({

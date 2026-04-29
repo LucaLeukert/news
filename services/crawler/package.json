@@ -17,6 +17,7 @@
     "@news/newspaper": "workspace:*",
     "@news/platform": "workspace:*",
     "@news/shared": "workspace:*",
+    "@news/types": "workspace:*",
     "drizzle-orm": "^0.43.1",
     "effect": "4.0.0-beta.56"
   },

@@ -3,10 +3,7 @@ import { NewsRpcClient, NewsRpcClientLive } from "@news/platform";
 import { DateTime, Effect } from "effect";
 import { internal } from "./_generated/api";
 import { internalAction } from "./_generated/server";
-import {
-  toStoryDetailProjection,
-  toStoryProjection,
-} from "./storyProjections";
+import { toStoryDetailProjection, toStoryProjection } from "./storyProjections";
 
 const replacePublicProjections: any = (internal as any).storyProjections
   .replacePublicProjections;
@@ -14,16 +11,18 @@ const replacePublicProjections: any = (internal as any).storyProjections
 export const syncFromRpc = internalAction({
   args: {},
   handler: (ctx) =>
-    Effect.runPromise(loadServerEnv(process["env"])).then((env) =>
+    Effect.runPromise(loadServerEnv(process.env)).then((env) =>
       Effect.runPromise(
         Effect.gen(function* () {
           const rpc = yield* NewsRpcClient;
           const stories = yield* rpc.listStories({});
           const details = yield* Effect.all(
             stories.map((story) =>
-              rpc.getStory(story.id).pipe(
-                Effect.map((detail) => detail ?? { story, articles: [] }),
-              ),
+              rpc
+                .getStory(story.id)
+                .pipe(
+                  Effect.map((detail) => detail ?? { story, articles: [] }),
+                ),
             ),
           );
           const syncedAt = yield* DateTime.now.pipe(

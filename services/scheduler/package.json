@@ -11,6 +11,7 @@
   "dependencies": {
     "@news/env": "workspace:*",
     "@news/platform": "workspace:*",
+    "@news/types": "workspace:*",
     "effect": "4.0.0-beta.56"
   },
   "devDependencies": {

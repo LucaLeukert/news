@@ -13,7 +13,10 @@ const nodeEnvSchema = z
 
 const databaseUrlSchema = z.string().url();
 const publicConvexUrlSchema = z.string().url().optional();
-const publicApiBaseUrlSchema = z.string().url().default("http://localhost:8787");
+const publicApiBaseUrlSchema = z
+  .string()
+  .url()
+  .default("http://localhost:8787");
 const publicClerkPublishableKeySchema = z.string().optional();
 
 const localDatabaseUrlSchema = databaseUrlSchema.default(
@@ -62,11 +65,7 @@ export const serverOnlyEnvSchema = {
   AI_MODEL_LOCAL_TEST_PUBLIC_SUMMARY: z.string().default("gemma3:1b"),
   AI_RUNNER_NODE_ID: z.string().default("local-dev"),
   AI_RUNNER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(3000),
-  AI_RUNNER_MAX_BATCH_PER_MODEL: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(25),
+  AI_RUNNER_MAX_BATCH_PER_MODEL: z.coerce.number().int().positive().default(25),
   EFFECT_DEVTOOLS: boolish,
 } as const;
 
@@ -112,7 +111,9 @@ export const makeDbEnv = (runtimeEnv: Record<string, string | undefined>) =>
     emptyStringAsUndefined: true,
   });
 
-export const makeDrizzleEnv = (runtimeEnv: Record<string, string | undefined>) =>
+export const makeDrizzleEnv = (
+  runtimeEnv: Record<string, string | undefined>,
+) =>
   createEnv({
     server: {
       DATABASE_URL: localDatabaseUrlSchema,

@@ -1,26 +1,40 @@
 import {
-  type OperationsSnapshot,
+  type AdminAiJobDetail,
+  type AdminAiJobListItem,
+  type AdminAiJobQuery,
   type AiResultEnvelope,
   type CrawlEnqueueRequest,
   type FailAiJobRequest,
   type LeaseAiJobRequest,
   type LeasedAiJob,
+  type ManualArticleIntakeRequest,
+  type ManualArticleIntakeResult,
+  type OperationsSnapshot,
+  type ReingestFailedVerificationRequest,
+  type ReingestFailedVerificationResult,
   type ResolveUrlResult,
-  type SyncPublicStoryProjectionsRequest,
   type Story,
   type StoryDetail,
   type StoryListQuery,
-  operationsSnapshotSchema,
+  type SyncPublicStoryProjectionsRequest,
+  adminAiJobDetailSchema,
+  adminAiJobListItemSchema,
+  adminAiJobQuerySchema,
   aiResultEnvelopeSchema,
   crawlEnqueueRequestSchema,
   failAiJobRequestSchema,
-  leasedAiJobSchema,
   leaseAiJobRequestSchema,
+  leasedAiJobSchema,
+  manualArticleIntakeRequestSchema,
+  manualArticleIntakeResultSchema,
+  operationsSnapshotSchema,
+  reingestFailedVerificationRequestSchema,
+  reingestFailedVerificationResultSchema,
   resolveUrlResultSchema,
-  syncPublicStoryProjectionsRequestSchema,
   storyDetailSchema,
   storyListQuerySchema,
   storySchema,
+  syncPublicStoryProjectionsRequestSchema,
 } from "@news/types";
 import { Context, Effect, Layer, Schema } from "effect";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
@@ -62,6 +76,26 @@ export class NewsRpcs extends RpcGroup.make(
     success: operationsSnapshotSchema,
     error: NewsRpcErrorSchema,
   }),
+  Rpc.make("ListAdminAiJobs", {
+    payload: adminAiJobQuerySchema,
+    success: Schema.Array(adminAiJobListItemSchema),
+    error: NewsRpcErrorSchema,
+  }),
+  Rpc.make("GetAdminAiJobDetail", {
+    payload: { jobId: Schema.String },
+    success: Schema.NullOr(adminAiJobDetailSchema),
+    error: NewsRpcErrorSchema,
+  }),
+  Rpc.make("ReingestFailedVerification", {
+    payload: reingestFailedVerificationRequestSchema,
+    success: reingestFailedVerificationResultSchema,
+    error: NewsRpcErrorSchema,
+  }),
+  Rpc.make("ManualArticleIntake", {
+    payload: manualArticleIntakeRequestSchema,
+    success: manualArticleIntakeResultSchema,
+    error: NewsRpcErrorSchema,
+  }),
   Rpc.make("ResolveUrl", {
     payload: { url: Schema.String },
     success: resolveUrlResultSchema,
@@ -101,7 +135,22 @@ export interface NewsRpcClientShape {
   readonly getStory: (
     id: string,
   ) => Effect.Effect<StoryDetail | null, HttpError>;
-  readonly getOperationsSnapshot: () => Effect.Effect<OperationsSnapshot, HttpError>;
+  readonly getOperationsSnapshot: () => Effect.Effect<
+    OperationsSnapshot,
+    HttpError
+  >;
+  readonly listAdminAiJobs: (
+    query?: AdminAiJobQuery,
+  ) => Effect.Effect<ReadonlyArray<AdminAiJobListItem>, HttpError>;
+  readonly getAdminAiJobDetail: (
+    jobId: string,
+  ) => Effect.Effect<AdminAiJobDetail | null, HttpError>;
+  readonly reingestFailedVerification: (
+    request: ReingestFailedVerificationRequest,
+  ) => Effect.Effect<ReingestFailedVerificationResult, HttpError>;
+  readonly manualArticleIntake: (
+    request: ManualArticleIntakeRequest,
+  ) => Effect.Effect<ManualArticleIntakeResult, HttpError>;
   readonly resolveUrl: (
     url: string,
   ) => Effect.Effect<ResolveUrlResult, HttpError>;
@@ -164,6 +213,22 @@ export const NewsRpcClientLive = (input: {
         getOperationsSnapshot: () =>
           client
             .GetOperationsSnapshot({}, { headers })
+            .pipe(Effect.mapError(mapRpcError)),
+        listAdminAiJobs: (query = {}) =>
+          client
+            .ListAdminAiJobs(query, { headers })
+            .pipe(Effect.mapError(mapRpcError)),
+        getAdminAiJobDetail: (jobId) =>
+          client
+            .GetAdminAiJobDetail({ jobId }, { headers })
+            .pipe(Effect.mapError(mapRpcError)),
+        reingestFailedVerification: (request) =>
+          client
+            .ReingestFailedVerification(request, { headers })
+            .pipe(Effect.mapError(mapRpcError)),
+        manualArticleIntake: (request) =>
+          client
+            .ManualArticleIntake(request, { headers })
             .pipe(Effect.mapError(mapRpcError)),
         resolveUrl: (url) =>
           client

@@ -75,7 +75,9 @@ export function parseFeed(xml: string): FeedItem[] {
             typeof (item.source?.["#text"] ?? item.source ?? channel.title) ===
             "string"
               ? decodeHtmlEntities(
-                  String(item.source?.["#text"] ?? item.source ?? channel.title),
+                  String(
+                    item.source?.["#text"] ?? item.source ?? channel.title,
+                  ),
                 )
               : null,
         },
@@ -91,15 +93,17 @@ export function parseFeed(xml: string): FeedItem[] {
     const url = link?.["@_href"] ?? link;
     if (!entry.title || !url) return [];
     return [
-        {
-          title: decodeHtmlEntities(String(entry.title?.["#text"] ?? entry.title)),
-          url: String(url),
-          publishedAt: toIsoDateOrNull(entry.published),
-          sourceName:
-            typeof doc.feed?.title === "string"
-              ? decodeHtmlEntities(doc.feed.title)
-              : null,
-        },
+      {
+        title: decodeHtmlEntities(
+          String(entry.title?.["#text"] ?? entry.title),
+        ),
+        url: String(url),
+        publishedAt: toIsoDateOrNull(entry.published),
+        sourceName:
+          typeof doc.feed?.title === "string"
+            ? decodeHtmlEntities(doc.feed.title)
+            : null,
+      },
     ];
   });
 }

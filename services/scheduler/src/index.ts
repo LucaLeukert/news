@@ -1,10 +1,10 @@
+import { loadServerEnv } from "@news/env";
 import {
   MetricsService,
   NewsRpcClient,
   NewsRpcClientLive,
   makeAppLayer,
 } from "@news/platform";
-import { loadServerEnv } from "@news/env";
 import type { CrawlEnqueueRequest } from "@news/types";
 import { DateTime, Effect, Layer } from "effect";
 

@@ -1,5 +1,6 @@
 import { api } from "@news/convex";
 import {
+  aiJobEvents,
   aiJobs,
   aiResults,
   articles,
@@ -9,14 +10,22 @@ import {
   stories,
 } from "@news/db";
 import {
-  decodeUnknownSync,
-  operationsSnapshotSchema,
-  storySummaryLooksSuspicious,
+  type AdminAiJobDetail,
+  type AdminAiJobListItem,
   type OperationsSnapshot,
+  adminAiJobDetailSchema,
+  adminAiJobListItemSchema,
+  decodeUnknownSync,
+  manualArticleIntakeResultSchema,
+  operationsSnapshotSchema,
+  reingestFailedVerificationResultSchema,
+  storySummaryLooksSuspicious,
 } from "@news/types";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { ConvexHttpClient } from "convex/browser";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
+import { ingestArticleUrls } from "../../../services/crawler/src/manual-intake";
+import { reingestFailedVerificationArticles } from "../../../services/crawler/src/reingest";
 
 class AdminStoreError extends Data.TaggedError("AdminStoreError")<{
   readonly message: string;
@@ -24,6 +33,14 @@ class AdminStoreError extends Data.TaggedError("AdminStoreError")<{
 }> {}
 
 const decodeOperationsSnapshot = decodeUnknownSync(operationsSnapshotSchema);
+const decodeAdminAiJobListItem = decodeUnknownSync(adminAiJobListItemSchema);
+const decodeAdminAiJobDetail = decodeUnknownSync(adminAiJobDetailSchema);
+const decodeManualArticleIntakeResult = decodeUnknownSync(
+  manualArticleIntakeResultSchema,
+);
+const decodeReingestFailedVerificationResult = decodeUnknownSync(
+  reingestFailedVerificationResultSchema,
+);
 
 const tryAdmin = <A>(message: string, try_: () => Promise<A>) =>
   Effect.tryPromise({
@@ -227,7 +244,7 @@ export const loadOperationsSnapshot = (input: {
     });
   });
 
-export const clearSuspiciousStorySummaries = (
+const _clearSuspiciousStorySummaries = (
   databaseUrl: string,
 ): Effect.Effect<
   {
@@ -311,3 +328,186 @@ export const clearSuspiciousStorySummaries = (
 
     return { affectedStoryIds, affectedJobIds };
   });
+
+export const listAdminAiJobs = (input: {
+  readonly databaseUrl: string;
+  readonly limit?: number;
+}): Effect.Effect<ReadonlyArray<AdminAiJobListItem>, AdminStoreError> =>
+  Effect.gen(function* () {
+    const db = createDb(input.databaseUrl);
+    const limit = Math.max(1, Math.min(input.limit ?? 100, 500));
+    const [jobs, results, events] = yield* Effect.all([
+      tryAdmin("Failed to load admin AI jobs", () =>
+        db
+          .select()
+          .from(aiJobs)
+          .orderBy(desc(aiJobs.updatedAt), desc(aiJobs.createdAt))
+          .limit(limit),
+      ),
+      tryAdmin("Failed to load admin AI job results", () =>
+        db
+          .select({
+            jobId: aiResults.jobId,
+            validationStatus: aiResults.validationStatus,
+            createdAt: aiResults.createdAt,
+          })
+          .from(aiResults)
+          .orderBy(desc(aiResults.createdAt)),
+      ),
+      tryAdmin("Failed to load admin AI job event counts", () =>
+        db
+          .select({
+            jobId: aiJobEvents.jobId,
+            count: sql<number>`count(*)`,
+          })
+          .from(aiJobEvents)
+          .groupBy(aiJobEvents.jobId),
+      ),
+    ]);
+
+    const latestResultByJobId = new Map<
+      string,
+      { readonly validationStatus: string; readonly createdAt: Date }
+    >();
+    for (const result of results) {
+      if (!latestResultByJobId.has(result.jobId)) {
+        latestResultByJobId.set(result.jobId, result);
+      }
+    }
+
+    const eventCountByJobId = new Map(
+      events.map((event) => [event.jobId, Number(event.count)] as const),
+    );
+
+    return jobs.map((job) =>
+      decodeAdminAiJobListItem({
+        ...job,
+        inputArtifactIds: job.inputArtifactIds,
+        leasedBy: job.leasedBy ?? null,
+        leaseExpiresAt: toIso(job.leaseExpiresAt),
+        lastError: job.lastError ?? null,
+        createdAt: job.createdAt.toISOString(),
+        updatedAt: job.updatedAt.toISOString(),
+        latestResultAt: toIso(latestResultByJobId.get(job.id)?.createdAt),
+        latestResultValidationStatus:
+          latestResultByJobId.get(job.id)?.validationStatus ?? null,
+        eventCount: eventCountByJobId.get(job.id) ?? 0,
+      }),
+    );
+  });
+
+export const getAdminAiJobDetail = (input: {
+  readonly databaseUrl: string;
+  readonly jobId: string;
+}): Effect.Effect<AdminAiJobDetail | null, AdminStoreError> =>
+  Effect.gen(function* () {
+    const db = createDb(input.databaseUrl);
+    const [jobRows, resultRows, eventRows] = yield* Effect.all([
+      tryAdmin(`Failed to load admin AI job ${input.jobId}`, () =>
+        db.select().from(aiJobs).where(eq(aiJobs.id, input.jobId)).limit(1),
+      ),
+      tryAdmin(`Failed to load AI results for job ${input.jobId}`, () =>
+        db
+          .select()
+          .from(aiResults)
+          .where(eq(aiResults.jobId, input.jobId))
+          .orderBy(desc(aiResults.createdAt)),
+      ),
+      tryAdmin(`Failed to load AI events for job ${input.jobId}`, () =>
+        db
+          .select()
+          .from(aiJobEvents)
+          .where(eq(aiJobEvents.jobId, input.jobId))
+          .orderBy(desc(aiJobEvents.createdAt)),
+      ),
+    ]);
+
+    const job = jobRows[0];
+    if (!job) {
+      return null;
+    }
+
+    return decodeAdminAiJobDetail({
+      job: {
+        ...job,
+        payload: job.payload,
+        inputArtifactIds: job.inputArtifactIds,
+        leasedBy: job.leasedBy ?? null,
+        leaseExpiresAt: toIso(job.leaseExpiresAt),
+        lastError: job.lastError ?? null,
+        createdAt: job.createdAt.toISOString(),
+        updatedAt: job.updatedAt.toISOString(),
+      },
+      results: resultRows.map((result) => ({
+        id: result.id,
+        jobId: result.jobId,
+        modelName: result.modelName,
+        modelVersion: result.modelVersion,
+        promptVersion: result.promptVersion,
+        inputArtifactIds: result.inputArtifactIds,
+        outputSchemaVersion: result.outputSchemaVersion,
+        structuredOutput: result.structuredOutput,
+        confidence: result.confidence,
+        reasons: result.reasons,
+        citationsToInputIds: result.citationsToInputIds,
+        validationStatus: result.validationStatus,
+        latencyMs: result.latencyMs,
+        createdAt: result.createdAt.toISOString(),
+      })),
+      events: eventRows.map((event) => ({
+        id: event.id,
+        jobId: event.jobId,
+        attemptNumber: event.attemptNumber,
+        level: event.level,
+        eventType: event.eventType,
+        message: event.message,
+        details: event.details,
+        createdAt: event.createdAt.toISOString(),
+      })),
+    });
+  });
+
+export const ingestAdminArticleUrls = (input: {
+  readonly databaseUrl: string;
+  readonly urls: ReadonlyArray<string>;
+}) =>
+  ingestArticleUrls(input.databaseUrl, {
+    urls: input.urls,
+  }).pipe(
+    Effect.map((result) => decodeManualArticleIntakeResult(result)),
+    Effect.mapError(
+      (cause) =>
+        new AdminStoreError({
+          message: "Failed to ingest admin article URLs",
+          cause,
+        }),
+    ),
+  );
+
+export const runAdminFailedVerificationReingest = (input: {
+  readonly databaseUrl: string;
+  readonly statuses?: ReadonlyArray<
+    | "rss_mismatch_title"
+    | "rss_mismatch_date"
+    | "canonical_failed"
+    | "extraction_failed"
+  >;
+  readonly sourceDomain?: string | null;
+  readonly limit?: number;
+  readonly overrideTitleMismatches?: boolean;
+}) =>
+  reingestFailedVerificationArticles(input.databaseUrl, {
+    statuses: input.statuses,
+    sourceDomain: input.sourceDomain,
+    limit: input.limit,
+    overrideTitleMismatches: input.overrideTitleMismatches,
+  }).pipe(
+    Effect.map((result) => decodeReingestFailedVerificationResult(result)),
+    Effect.mapError(
+      (cause) =>
+        new AdminStoreError({
+          message: "Failed to reingest failed-verification articles",
+          cause,
+        }),
+    ),
+  );

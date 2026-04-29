@@ -1,16 +1,14 @@
 import {
-  normalizeNarrativeText,
-  storySummaryLooksSuspicious,
   type AiJobType,
   type AiStructuredOutput,
   type AiValidationStatus,
   type StorySummaryOutput,
+  normalizeNarrativeText,
+  storySummaryLooksSuspicious,
 } from "@news/types";
 
 const sanitizeList = (values: ReadonlyArray<string>) =>
-  values
-    .map(normalizeNarrativeText)
-    .filter((value) => value.length > 0);
+  values.map(normalizeNarrativeText).filter((value) => value.length > 0);
 
 export const sanitizeStructuredOutput = (
   jobType: AiJobType,
@@ -35,7 +33,8 @@ export const validationStatusForStructuredOutput = (
   jobType: AiJobType,
   output: AiStructuredOutput,
 ): AiValidationStatus =>
-  jobType === "neutral_story_summary" && storySummaryLooksSuspicious(output as StorySummaryOutput)
+  jobType === "neutral_story_summary" &&
+  storySummaryLooksSuspicious(output as StorySummaryOutput)
     ? "failed_schema_validation"
     : "valid";
 

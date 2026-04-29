@@ -1,28 +1,27 @@
-import { UserButton } from "@clerk/nextjs";
-import { auth } from "@clerk/nextjs/server";
 import { Effect } from "effect";
-import { env } from "../env";
+import { ArrowRight, Send, Sparkles } from "lucide-react";
+import Link from "next/link";
 import {
-  enqueueCrawlAction,
-  reingestFailedVerificationAction,
-  resolveUrlAction,
-  syncProjectionAction,
-} from "./actions";
+  QueueCrawlButton,
+  ReingestFailedVerificationForm,
+  SyncProjectionButton,
+} from "./admin-actions";
+import { AdminShell } from "./admin-shell";
+import { Badge } from "./components/ui/badge";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "./components/ui/card";
 import { OperationsDashboard } from "./operations-dashboard";
 import { adminRpc } from "./rpc";
 
 export default async function AdminHome(props: {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [identity, snapshot, searchParams] = await Promise.all([
-    Effect.runPromise(
-      Effect.tryPromise(() => auth()).pipe(
-        Effect.catchIf(
-          () => true,
-          () => Effect.succeed({ userId: null, orgId: null }),
-        ),
-      ),
-    ),
+  const [snapshot, searchParams] = await Promise.all([
     Effect.runPromise(adminRpc((rpc) => rpc.getOperationsSnapshot())),
     props.searchParams ??
       Promise.resolve({} as Record<string, string | string[] | undefined>),
@@ -32,148 +31,169 @@ export default async function AdminHome(props: {
     typeof searchParams.notice === "string" ? searchParams.notice : null;
 
   return (
-    <main className="admin-shell">
-      <aside className="sidebar">
-        <strong>Coverage Lens</strong>
-        <a href="#overview">Overview</a>
-        <a href="#controls">Controls</a>
-        <a href="#sources">Sources</a>
-        <a href="#jobs">AI Jobs</a>
-        <a href="#sync">Sync</a>
-      </aside>
-      <section className="content">
-        <header className="page-header">
-          <div>
-            <h1>Operations</h1>
-            <p>
-              {identity.userId
-                ? `Authenticated operator ${identity.userId}`
-                : "Protected in production by Cloudflare Access and Clerk."}
-            </p>
-            <p className="subtle">
-              API: {env.NEXT_PUBLIC_API_BASE_URL} · Latest AI result:{" "}
-              {snapshot.overview.latestAiResultAt
-                ? new Date(snapshot.overview.latestAiResultAt).toLocaleString()
-                : "never"}
-            </p>
-          </div>
-          {env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserButton /> : null}
-        </header>
-
-        {notice ? <div className="notice">{notice}</div> : null}
-
-        <section className="panel" id="controls">
-          <div className="panel-head">
-            <h2>Controls</h2>
-            <p>RPC-only operational actions for crawl, sync, and URL intake.</p>
-          </div>
-          <div className="control-grid">
-            <form action={enqueueCrawlAction} className="control-card">
-              <h3>RSS Check Sweep</h3>
-              <p>Queue the scheduler-style feed verification pass.</p>
-              <input type="hidden" name="kind" value="rss_checks" />
-              <button type="submit">Queue RSS Checks</button>
-            </form>
-            <form action={enqueueCrawlAction} className="control-card">
-              <h3>Story Refresh Sweep</h3>
-              <p>Queue a stale-story refresh cycle.</p>
-              <input type="hidden" name="kind" value="stale_story_refresh" />
-              <button type="submit">Queue Refresh</button>
-            </form>
-            <form action={syncProjectionAction} className="control-card">
-              <h3>Projection Sync</h3>
-              <p>Push canonical public stories back into Convex.</p>
-              <button type="submit">Queue Sync</button>
-            </form>
-            <form
-              action={reingestFailedVerificationAction}
-              className="control-card control-card-wide"
+    <AdminShell
+      title="Operations"
+      subtitle="System health, story rebuild controls, and verification recovery."
+      notice={notice}
+      currentPath="/"
+    >
+      <section className="grid gap-4 xl:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <Badge variant="muted" className="w-fit">
+              Workspaces
+            </Badge>
+            <CardTitle>
+              Focused tools instead of one overloaded console
+            </CardTitle>
+            <CardDescription>
+              Separate high-noise operational tasks into dedicated views with
+              durable logs and manual intake controls.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 md:grid-cols-2">
+            <Link
+              href="/ai-jobs"
+              className="group rounded-[24px] border border-stone-200 bg-stone-50/80 p-5 transition hover:border-stone-300 hover:bg-white"
             >
-              <h3>Reingest Failed Verification</h3>
-              <p>
-                Re-fetch failed verification articles, update crawl status,
-                requeue AI jobs, and rebuild stories.
-              </p>
-              <label className="field">
-                <span>Source Domain</span>
-                <input
-                  type="text"
-                  name="sourceDomain"
-                  placeholder="zdfheute.de"
-                />
-              </label>
-              <label className="field">
-                <span>Limit</span>
-                <input type="number" name="limit" min="1" defaultValue="100" />
-              </label>
-              <fieldset className="field">
-                <legend>Statuses</legend>
-                <label>
-                  <input
-                    type="checkbox"
-                    name="statuses"
-                    value="rss_mismatch_title"
-                    defaultChecked
-                  />
-                  RSS title mismatch
-                </label>
-                <label>
-                  <input
-                    type="checkbox"
-                    name="statuses"
-                    value="rss_mismatch_date"
-                    defaultChecked
-                  />
-                  RSS date mismatch
-                </label>
-                <label>
-                  <input
-                    type="checkbox"
-                    name="statuses"
-                    value="canonical_failed"
-                  />
-                  Canonical fetch failed
-                </label>
-                <label>
-                  <input
-                    type="checkbox"
-                    name="statuses"
-                    value="extraction_failed"
-                  />
-                  Extraction failed
-                </label>
-              </fieldset>
-              <fieldset className="field">
-                <legend>Manual Override</legend>
-                <label>
-                  <input
-                    type="checkbox"
-                    name="overrideTitleMismatches"
-                    value="on"
-                  />
-                  Promote persistent title mismatches to verified after reingest
-                </label>
-              </fieldset>
-              <button type="submit">Reingest Failed Articles</button>
-            </form>
-            <form action={resolveUrlAction} className="control-card control-card-wide">
-              <h3>Resolve URL</h3>
-              <p>Match a URL to an existing story or queue it for crawling.</p>
-              <label className="field">
-                <span>Article URL</span>
-                <input
-                  type="url"
-                  name="url"
-                  placeholder="https://example.com/article"
-                  required
-                />
-              </label>
-              <button type="submit">Resolve Or Queue</button>
-            </form>
-          </div>
-        </section>
-        <OperationsDashboard initialSnapshot={snapshot} />
+              <div className="flex items-center justify-between">
+                <Sparkles className="size-5 text-stone-500" />
+                <ArrowRight className="size-4 text-stone-400 transition group-hover:translate-x-1" />
+              </div>
+              <div className="mt-4 space-y-2">
+                <div className="text-lg font-semibold text-stone-950">
+                  AI Runs
+                </div>
+                <p className="text-sm leading-6 text-stone-500">
+                  Review queue state, grouped attempts, logs, and outputs.
+                </p>
+              </div>
+            </Link>
+            <Link
+              href="/enqueue"
+              className="group rounded-[24px] border border-stone-200 bg-stone-50/80 p-5 transition hover:border-stone-300 hover:bg-white"
+            >
+              <div className="flex items-center justify-between">
+                <Send className="size-5 text-stone-500" />
+                <ArrowRight className="size-4 text-stone-400 transition group-hover:translate-x-1" />
+              </div>
+              <div className="mt-4 space-y-2">
+                <div className="text-lg font-semibold text-stone-950">
+                  Article Enqueue
+                </div>
+                <p className="text-sm leading-6 text-stone-500">
+                  Fetch one or many canonical article URLs directly.
+                </p>
+              </div>
+            </Link>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <Badge variant="muted" className="w-fit">
+              Notes
+            </Badge>
+            <CardTitle>Operational guardrails</CardTitle>
+            <CardDescription>
+              Admin reads use direct typed Effect RPC through React Query. Queue
+              mutations and manual recovery stay on server actions.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm leading-6 text-stone-600">
+            <p>
+              Overview data refreshes automatically every five seconds without a
+              separate proxy endpoint in the admin app.
+            </p>
+            <p>
+              AI run detail pages preserve every lease, retry, duplicate
+              submission, and rebuild failure event for postmortem work.
+            </p>
+            <p>
+              Direct article intake bypasses the dead crawl-queue path and
+              pushes fetched articles back into clustering and AI processing.
+            </p>
+          </CardContent>
+        </Card>
       </section>
-    </main>
+
+      <section id="controls" className="space-y-4">
+        <div>
+          <h2 className="text-xl font-semibold tracking-tight text-stone-950">
+            Controls
+          </h2>
+          <p className="mt-1 text-sm text-stone-500">
+            Operational actions that still belong on the overview page.
+          </p>
+        </div>
+      </section>
+      <section className="grid gap-4 xl:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <Badge variant="muted" className="w-fit">
+              Crawl
+            </Badge>
+            <CardTitle>RSS Check Sweep</CardTitle>
+            <CardDescription>
+              Queue the scheduler-style feed verification pass.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <QueueCrawlButton kind="rss_checks" label="Queue RSS Checks" />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <Badge variant="muted" className="w-fit">
+              Crawl
+            </Badge>
+            <CardTitle>Story Refresh Sweep</CardTitle>
+            <CardDescription>
+              Queue a stale-story refresh cycle.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <QueueCrawlButton
+              kind="stale_story_refresh"
+              label="Queue Refresh"
+            />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <Badge variant="muted" className="w-fit">
+              Sync
+            </Badge>
+            <CardTitle>Projection Sync</CardTitle>
+            <CardDescription>
+              Push canonical public stories back into Convex.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <SyncProjectionButton />
+          </CardContent>
+        </Card>
+
+        <Card className="xl:col-span-2">
+          <CardHeader>
+            <Badge variant="muted" className="w-fit">
+              Recovery
+            </Badge>
+            <CardTitle>Reingest Failed Verification</CardTitle>
+            <CardDescription>
+              Re-fetch failed verification articles, update crawl status,
+              requeue AI jobs, and rebuild stories.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ReingestFailedVerificationForm />
+          </CardContent>
+        </Card>
+      </section>
+
+      <OperationsDashboard initialSnapshot={snapshot} />
+    </AdminShell>
   );
 }

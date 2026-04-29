@@ -63,7 +63,9 @@ export const aiJobModelFeatures = {
   safety_compliance_check: "editorialReview",
 } as const satisfies Record<AiJobType, GenerativeModelFeature>;
 
-export const resolveModelPolicy = (env: ModelPolicyRuntimeEnv): AiModelPolicy =>
+export const resolveModelPolicy = (
+  env: ModelPolicyRuntimeEnv,
+): AiModelPolicy =>
   env.AI_MODEL_POLICY_PROFILE === "real"
     ? {
         extraction: env.AI_MODEL_REAL_EXTRACTION,

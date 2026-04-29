@@ -3,15 +3,15 @@ import "server-only";
 import { api } from "@news/convex";
 import { env } from "@news/env/next";
 import {
+  type Story,
+  type StoryDetail,
   decodeUnknownSync,
   demoStory,
   storyDetailSchema,
-  type Story,
-  type StoryDetail,
 } from "@news/shared";
-import { Effect } from "effect";
 import { ConvexHttpClient } from "convex/browser";
 import { fetchQuery } from "convex/nextjs";
+import { Effect } from "effect";
 import { makePostgresRepository } from "../../api/src/repository";
 
 const isDemoFallbackStories = (stories: ReadonlyArray<Story>) =>
@@ -22,16 +22,14 @@ const isRealStoryList = (stories: ReadonlyArray<Story>) =>
 
 const decodePublicStoryDetail = decodeUnknownSync(storyDetailSchema);
 
-type ProjectionSummary =
-  | {
-      neutralSummary: string;
-      agreed: string[];
-      differs: string[];
-      contestedOrUnverified: string[];
-      confidence: number;
-      lastUpdatedAt: string;
-    }
-  | null;
+type ProjectionSummary = {
+  neutralSummary: string;
+  agreed: string[];
+  differs: string[];
+  contestedOrUnverified: string[];
+  confidence: number;
+  lastUpdatedAt: string;
+} | null;
 
 const toProjectionSummary = (summary: Story["summary"]): ProjectionSummary =>
   summary
@@ -106,11 +104,13 @@ async function syncPublicStoryProjectionsFromApi(): Promise<{
   const details = await Effect.runPromise(
     Effect.all(
       stories.map((story) =>
-        repository.getStory(story.id).pipe(
-          Effect.map((detail) =>
-            decodePublicStoryDetail(detail ?? { story, articles: [] }),
+        repository
+          .getStory(story.id)
+          .pipe(
+            Effect.map((detail) =>
+              decodePublicStoryDetail(detail ?? { story, articles: [] }),
+            ),
           ),
-        ),
       ),
     ),
   );

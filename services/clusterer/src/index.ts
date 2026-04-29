@@ -13,6 +13,7 @@ export type ClusterCandidate = {
   canonicalUrl: string;
   title: string;
   entityKeys: string[];
+  focusTokens: string[];
   publishedAt: string | null;
   semanticFingerprint: string | null;
 };
@@ -67,6 +68,49 @@ const STOP_WORDS = new Set([
   "with",
 ]);
 
+const GENERIC_CLUSTER_TOKENS = new Set([
+  "aktien",
+  "aktie",
+  "aktienmarkte",
+  "aktienmarkten",
+  "aktienmarkt",
+  "anlage",
+  "brent",
+  "crude",
+  "dollar",
+  "earnings",
+  "energy",
+  "finanzen",
+  "gewinn",
+  "gewinne",
+  "iran",
+  "krieg",
+  "markt",
+  "markte",
+  "markets",
+  "market",
+  "oel",
+  "ol",
+  "oil",
+  "olpreis",
+  "olpreise",
+  "olpreis",
+  "olpreisschock",
+  "olmarkt",
+  "olmarkte",
+  "preise",
+  "price",
+  "prices",
+  "profit",
+  "profits",
+  "rohöl",
+  "rohol",
+  "stocks",
+  "talks",
+  "verhandlungen",
+  "war",
+]);
+
 function stableUuidFromText(text: string) {
   let hash = 0x811c9dc5;
   for (const char of text) {
@@ -93,6 +137,19 @@ function normalizeClusteringText(value: string) {
 
 function tokenizeClusteringText(value: string) {
   return normalizeClusteringText(value).match(TOKEN_PATTERN) ?? [];
+}
+
+function extractFocusTokens(value: string) {
+  return [
+    ...new Set(
+      tokenizeClusteringText(value).filter(
+        (token) =>
+          token.length >= 3 &&
+          !STOP_WORDS.has(token) &&
+          !GENERIC_CLUSTER_TOKENS.has(token),
+      ),
+    ),
+  ];
 }
 
 function jaccard(a: ReadonlySet<string>, b: ReadonlySet<string>) {
@@ -124,6 +181,17 @@ export function extractEntityKeysFromTitle(title: string) {
 export function toClusterCandidate(
   article: ClusterableArticle,
 ): ClusterCandidate {
+  const focusTokens = [
+    ...new Set(
+      [
+        article.title,
+        article.semanticFingerprint ?? "",
+        ...(article.aiEntityKeys ?? []),
+        ...(article.aiClaimKeys ?? []),
+        ...(article.semanticCuePhrases ?? []),
+      ].flatMap(extractFocusTokens),
+    ),
+  ];
   return {
     id: article.id,
     canonicalUrl: article.canonicalUrl,
@@ -133,9 +201,12 @@ export function toClusterCandidate(
         ...extractEntityKeysFromTitle(article.title),
         ...(article.aiEntityKeys ?? []).flatMap(extractEntityKeysFromTitle),
         ...(article.aiClaimKeys ?? []).flatMap(extractEntityKeysFromTitle),
-        ...(article.semanticCuePhrases ?? []).flatMap(extractEntityKeysFromTitle),
+        ...(article.semanticCuePhrases ?? []).flatMap(
+          extractEntityKeysFromTitle,
+        ),
       ]),
     ],
+    focusTokens,
     publishedAt: article.publishedAt,
     semanticFingerprint: article.semanticFingerprint ?? null,
   };
@@ -158,8 +229,15 @@ export function semanticClusteringTextFor(article: ClusterableArticle) {
 export function combineClusterScores(
   lexicalScore: number,
   semanticScore?: number,
+  options?: {
+    readonly hasStorySpecificOverlap?: boolean;
+  },
 ) {
   if (semanticScore === undefined) {
+    return lexicalScore;
+  }
+
+  if (options?.hasStorySpecificOverlap === false && semanticScore < 0.82) {
     return lexicalScore;
   }
 
@@ -169,18 +247,26 @@ export function combineClusterScores(
 }
 
 export function scoreSameStory(a: ClusterCandidate, b: ClusterCandidate) {
-  const titleTokensA = new Set(
-    tokenizeClusteringText(a.title).filter(Boolean),
-  );
-  const titleTokensB = new Set(
-    tokenizeClusteringText(b.title).filter(Boolean),
-  );
+  const titleTokensA = new Set(tokenizeClusteringText(a.title).filter(Boolean));
+  const titleTokensB = new Set(tokenizeClusteringText(b.title).filter(Boolean));
   const titleScore = jaccard(titleTokensA, titleTokensB);
-  const sharedEntities = a.entityKeys.filter((entity) =>
-    b.entityKeys.includes(entity),
+  const specificEntityKeysA = [
+    ...new Set(a.entityKeys.flatMap((entity) => extractFocusTokens(entity))),
+  ];
+  const specificEntityKeysB = [
+    ...new Set(b.entityKeys.flatMap((entity) => extractFocusTokens(entity))),
+  ];
+  const sharedEntities = specificEntityKeysA.filter((entity) =>
+    specificEntityKeysB.includes(entity),
   ).length;
   const entityScore =
-    sharedEntities / Math.max(a.entityKeys.length, b.entityKeys.length, 1);
+    sharedEntities /
+    Math.max(specificEntityKeysA.length, specificEntityKeysB.length, 1);
+  const sharedFocusTokens = a.focusTokens.filter((token) =>
+    b.focusTokens.includes(token),
+  ).length;
+  const focusScore =
+    sharedFocusTokens / Math.max(a.focusTokens.length, b.focusTokens.length, 1);
   const fingerprintTokensA = fingerprintTokens(a.semanticFingerprint);
   const fingerprintTokensB = fingerprintTokens(b.semanticFingerprint);
   const fingerprintScore =
@@ -202,16 +288,22 @@ export function scoreSameStory(a: ClusterCandidate, b: ClusterCandidate) {
       : timeScore >= 0.8 && sharedEntities >= 3
         ? 0.1
         : 0;
-
-  return Number(
+  const score = Number(
     (
-      titleScore * 0.2 +
-      entityScore * 0.25 +
-      fingerprintScore * 0.45 +
-      timeScore * 0.1 +
+      titleScore * 0.12 +
+      focusScore * 0.38 +
+      entityScore * 0.18 +
+      fingerprintScore * 0.24 +
+      timeScore * 0.08 +
       sharedEntityBoost
     ).toFixed(3),
   );
+
+  if (sharedFocusTokens === 0 && sharedEntities < 2 && fingerprintScore < 0.5) {
+    return Number(Math.min(score, 0.24).toFixed(3));
+  }
+
+  return score;
 }
 
 function incrementRecord(
@@ -311,7 +403,11 @@ function canUseArticleForPublicClustering(article: ClusterableArticle) {
   ) {
     return false;
   }
-  if (["non_article", "duplicate", "sponsored", "satire"].includes(article.articleType)) {
+  if (
+    ["non_article", "duplicate", "sponsored", "satire"].includes(
+      article.articleType,
+    )
+  ) {
     return false;
   }
   return true;
@@ -370,11 +466,21 @@ export function clusterArticles(
       | undefined;
 
     for (const cluster of clusters) {
+      const lexicalScore = scoreSameStory(cluster.anchor, candidate);
+      const hasStorySpecificOverlap =
+        cluster.anchor.focusTokens.some((token) =>
+          candidate.focusTokens.includes(token),
+        ) ||
+        jaccard(
+          new Set(cluster.anchor.focusTokens),
+          new Set(candidate.focusTokens),
+        ) >= 0.2;
       const score = combineClusterScores(
-        scoreSameStory(cluster.anchor, candidate),
+        lexicalScore,
         options.semanticPairScores?.get(
           semanticPairKey(cluster.anchor.id, candidate.id),
         ),
+        { hasStorySpecificOverlap },
       );
       if (score >= threshold && (!best || score > best.score)) {
         best = { cluster, score };

@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@news/ai": "workspace:*",
     "@news/convex": "workspace:*",
     "@news/db": "workspace:*",
     "@news/env": "workspace:*",
@@ -20,8 +21,7 @@
     "@news/types": "workspace:*",
     "convex": "^1.36.0",
     "drizzle-orm": "^0.43.1",
-    "effect": "4.0.0-beta.56",
-    "zod": "^3.24.3"
+    "effect": "4.0.0-beta.56"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250418.0",

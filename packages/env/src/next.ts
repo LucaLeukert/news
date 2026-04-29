@@ -2,7 +2,7 @@ import { createEnv } from "@t3-oss/env-nextjs";
 import { clientEnvSchema, serverOnlyEnvSchema } from "./index";
 
 const runtimeEnv: Record<string, string | undefined> =
-  typeof process === "undefined" ? {} : process["env"];
+  typeof process === "undefined" ? {} : process.env;
 
 export const env = createEnv({
   server: serverOnlyEnvSchema,

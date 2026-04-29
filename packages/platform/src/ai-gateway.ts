@@ -1,6 +1,6 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { ServerEnv } from "@news/env";
-import { Output, embedMany, generateText, rerank } from "ai";
+import { Output, embedMany, generateText } from "ai";
 import { Clock, Context, Effect, Layer } from "effect";
 import type { z } from "zod";
 import { AiGatewayError } from "./errors";
@@ -56,7 +56,9 @@ const resolveAiHostBaseUrl = (
 const resolveDefaultModel = (
   env: Pick<
     ServerEnv,
-    "AI_HOST_PROFILE" | "AI_HOST_REAL_DEFAULT_MODEL" | "AI_HOST_LOCAL_DEFAULT_MODEL"
+    | "AI_HOST_PROFILE"
+    | "AI_HOST_REAL_DEFAULT_MODEL"
+    | "AI_HOST_LOCAL_DEFAULT_MODEL"
   >,
 ) =>
   env.AI_HOST_PROFILE === "real"
@@ -82,11 +84,7 @@ export const makeAiGateway = Effect.fn(function* (
   });
 
   return {
-    generateText: ({
-      prompt,
-      model = defaultModel,
-      maxRetries = 0,
-    }) => {
+    generateText: ({ prompt, model = defaultModel, maxRetries = 0 }) => {
       return Effect.gen(function* () {
         const started = yield* Clock.currentTimeMillis;
         return yield* Effect.tryPromise({
@@ -223,47 +221,80 @@ export const makeAiGateway = Effect.fn(function* (
     }) =>
       Effect.gen(function* () {
         const started = yield* Clock.currentTimeMillis;
-        const rerankingModelFactory = aiHost.rerankingModel;
-        if (!rerankingModelFactory) {
+
+        const ranking = yield* Effect.tryPromise({
+          try: () =>
+            embedMany({
+              model: aiHost.embeddingModel(model),
+              values: [query, ...documents],
+              maxRetries,
+            }).then(({ embeddings }) => embeddings),
+          catch: (cause) =>
+            new AiGatewayError({
+              message: "Local embedding generation failed",
+              cause,
+            }),
+        });
+
+        const queryEmbedding = ranking[0];
+        if (!queryEmbedding) {
           return yield* new AiGatewayError({
-            message: "Configured provider does not support reranking models",
+            message: "Missing query embedding",
           });
         }
 
-        return yield* Effect.tryPromise({
-          try: () =>
-            rerank({
-              model: rerankingModelFactory(model),
-              query,
-              documents: [...documents],
-              topN,
-              maxRetries,
-            }).then(({ ranking }) => ranking),
-          catch: (cause) =>
-            new AiGatewayError({
-              message: "Local reranking failed",
-              cause,
-            }),
-        }).pipe(
-          Effect.tap(() =>
+        const documentEmbeddings = ranking.slice(1);
+
+        const scored = yield* Effect.forEach(
+          documents.map((document, index) => ({
+            document,
+            originalIndex: index,
+            embedding: documentEmbeddings[index],
+          })),
+          ({ document, originalIndex, embedding }) =>
             Effect.gen(function* () {
-              const finished = yield* Clock.currentTimeMillis;
-              yield* Effect.logInfo("ai.rerank.completed", {
-                model,
-                count: documents.length,
-                latencyMs: finished - started,
-              });
+              if (!embedding) {
+                return yield* new AiGatewayError({
+                  message: "Missing document embedding",
+                });
+              }
+
+              const score = yield* cosineSimilarity(queryEmbedding, embedding);
+
+              return {
+                document,
+                originalIndex,
+                score,
+              };
             }),
-          ),
-          Effect.catchTag("AiGatewayError", (error) =>
-            Effect.gen(function* () {
-              yield* metrics.increment("ai.schema_failure", { model });
-              yield* Effect.logWarning("ai.rerank.failed", error);
-              return yield* error;
-            }),
-          ),
+          { concurrency: "unbounded" },
         );
-      }),
+
+        const result = scored
+          .sort((a, b) => b.score - a.score)
+          .slice(0, topN ?? scored.length);
+
+        yield* Effect.gen(function* () {
+          const finished = yield* Clock.currentTimeMillis;
+
+          yield* Effect.logInfo("ai.rerank.completed", {
+            model,
+            count: documents.length,
+            latencyMs: finished - started,
+            strategy: "embedding-cosine-effect",
+          });
+        });
+
+        return result;
+      }).pipe(
+        Effect.catchTag("AiGatewayError", (error) =>
+          Effect.gen(function* () {
+            yield* metrics.increment("ai.schema_failure", { model });
+            yield* Effect.logWarning("ai.rerank.failed", error);
+            return yield* error;
+          }),
+        ),
+      ),
   } satisfies AiGatewayShape;
 });
 
@@ -288,3 +319,35 @@ export const AiGatewayLive = (
     | "AI_HOST_LOCAL_DEFAULT_MODEL"
   >,
 ) => AiGatewayLayer(env).pipe(Layer.provide(MetricsLive));
+
+const cosineSimilarity = (
+  a: ReadonlyArray<number>,
+  b: ReadonlyArray<number>,
+): Effect.Effect<number, AiGatewayError> => {
+  if (a.length !== b.length) {
+    return Effect.fail(
+      new AiGatewayError({
+        message: "cosineSimilarity: vectors must have the same length",
+      }),
+    );
+  }
+
+  return Effect.sync(() => {
+    let dot = 0;
+    let normA = 0;
+    let normB = 0;
+
+    for (let i = 0; i < a.length; i++) {
+      const av = a[i] ?? 0;
+      const bv = b[i] ?? 0;
+
+      dot += av * bv;
+      normA += av * av;
+      normB += bv * bv;
+    }
+
+    const denominator = Math.sqrt(normA) * Math.sqrt(normB);
+
+    return denominator === 0 ? 0 : dot / denominator;
+  });
+};

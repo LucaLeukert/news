@@ -1,12 +1,13 @@
-import { demoArticles, demoStory, type Story, type StoryDetail } from "@news/shared";
 import { loadServerEnv } from "@news/env";
-import { Data, Effect } from "effect";
-import { v } from "convex/values";
 import {
-  mutation,
-  internalMutation,
-  query,
-} from "./_generated/server";
+  type Story,
+  type StoryDetail,
+  demoArticles,
+  demoStory,
+} from "@news/shared";
+import { v } from "convex/values";
+import { Data, Effect } from "effect";
+import { internalMutation, mutation, query } from "./_generated/server";
 
 const storySummaryValidator = v.object({
   neutralSummary: v.string(),
@@ -72,7 +73,9 @@ const replaceProjectionArgsValidator = {
   details: v.array(storyDetailProjectionValidator),
 };
 
-class UnauthorizedSyncError extends Data.TaggedError("UnauthorizedSyncError")<{}> {}
+class UnauthorizedSyncError extends Data.TaggedError("UnauthorizedSyncError")<
+  Record<never, never>
+> {}
 
 export const toStoryProjection = (story: Story, syncedAt: string) => ({
   storyId: story.id,
@@ -91,7 +94,10 @@ export const toStoryProjection = (story: Story, syncedAt: string) => ({
   syncedAt,
 });
 
-export const toStoryDetailProjection = (detail: StoryDetail, syncedAt: string) => ({
+export const toStoryDetailProjection = (
+  detail: StoryDetail,
+  syncedAt: string,
+) => ({
   storyId: detail.story.id,
   story: {
     ...detail.story,
@@ -122,7 +128,9 @@ export const toStoryDetailProjection = (detail: StoryDetail, syncedAt: string) =
 
 const demoStoryDetail: StoryDetail = {
   story: demoStory,
-  articles: demoArticles.map(({ publisher: _publisher, country: _country, ...article }) => article),
+  articles: demoArticles.map(
+    ({ publisher: _publisher, country: _country, ...article }) => article,
+  ),
 };
 
 export const listStories = query({
@@ -200,11 +208,15 @@ function replacePublicProjectionDocuments(
       Promise.all(existingDetails.map((doc) => ctx.db.delete(doc._id))),
     )
     .then(() =>
-      Promise.all(args.stories.map((story) => ctx.db.insert("public_stories", story))),
+      Promise.all(
+        args.stories.map((story) => ctx.db.insert("public_stories", story)),
+      ),
     )
     .then(() =>
       Promise.all(
-        args.details.map((detail) => ctx.db.insert("public_story_details", detail)),
+        args.details.map((detail) =>
+          ctx.db.insert("public_story_details", detail),
+        ),
       ),
     )
     .then(() => ({
@@ -224,13 +236,12 @@ export const replacePublicProjectionsFromSync = mutation({
     ...replaceProjectionArgsValidator,
   },
   handler: (ctx, args) =>
-    loadServerEnv(process["env"])
-      .pipe(
-        Effect.flatMap((env) =>
-          args.serviceToken !== env.INTERNAL_SERVICE_TOKEN
-            ? Effect.fail(new UnauthorizedSyncError())
-            : Effect.promise(() => replacePublicProjectionDocuments(ctx, args)),
-        ),
-        Effect.runPromise,
+    loadServerEnv(process.env).pipe(
+      Effect.flatMap((env) =>
+        args.serviceToken !== env.INTERNAL_SERVICE_TOKEN
+          ? Effect.fail(new UnauthorizedSyncError())
+          : Effect.promise(() => replacePublicProjectionDocuments(ctx, args)),
       ),
+      Effect.runPromise,
+    ),
 });

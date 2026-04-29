@@ -1,225 +1,312 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import type { OperationsSnapshot } from "@news/types";
+import { AlertTriangle, Bot, Database, Globe2, RefreshCw } from "lucide-react";
+import type { ReactNode } from "react";
+import { Badge } from "./components/ui/badge";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "./components/ui/card";
+import { useOperationsSnapshotQuery } from "./rpc-client";
 
 const formatTimestamp = (value: string | null) =>
   value ? new Date(value).toLocaleString() : "never";
 
 const formatStatus = (value: string) => value.replaceAll("_", " ");
 
+const statusVariant = (value: string) => {
+  if (value.includes("failed")) return "destructive" as const;
+  if (value.includes("completed") || value.includes("projected")) {
+    return "success" as const;
+  }
+  return "default" as const;
+};
+
+const TableHeader = ({ children }: { readonly children: ReactNode }) => (
+  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">
+    {children}
+  </th>
+);
+
+const TableCell = ({ children }: { readonly children: ReactNode }) => (
+  <td className="px-4 py-4 align-top text-sm text-stone-700">{children}</td>
+);
+
 export function OperationsDashboard(props: {
   initialSnapshot: OperationsSnapshot;
 }) {
-  const [snapshot, setSnapshot] = useState(props.initialSnapshot);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const load = async () => {
-      const response = await fetch("/api/operations", {
-        cache: "no-store",
-      });
-      if (!response.ok) return;
-      const next = (await response.json()) as OperationsSnapshot;
-      if (!cancelled) {
-        setSnapshot(next);
-      }
-    };
-
-    const interval = window.setInterval(() => {
-      void load();
-    }, 5000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, []);
+  const { data } = useOperationsSnapshotQuery(props.initialSnapshot);
+  const snapshot = data ?? props.initialSnapshot;
 
   const healthRows = [
-    [
-      "Sources / Feeds",
-      `${snapshot.overview.sourceCount} / ${snapshot.overview.feedCount}`,
-      "Configured publishers and feed endpoints",
-    ],
-    [
-      "Articles / Stories",
-      `${snapshot.overview.articleCount} / ${snapshot.overview.storyCount}`,
-      "Canonical store coverage",
-    ],
-    [
-      "Projection Coverage",
-      `${snapshot.overview.syncedStoryCount}/${snapshot.overview.storyCount}`,
-      "Canonical stories present in Convex",
-    ],
-    [
-      "Held Summaries",
-      String(snapshot.overview.heldSummaryCount),
-      "Stories without a publishable summary",
-    ],
-    [
-      "Suspicious Summaries",
-      String(snapshot.overview.suspiciousSummaryCount),
-      "Malformed summaries that need review",
-    ],
-    [
-      "AI Queue",
-      `${snapshot.overview.aiJobsPending} pending / ${snapshot.overview.aiJobsLeased} leased`,
-      "Live AI workload",
-    ],
+    {
+      label: "Sources / Feeds",
+      value: `${snapshot.overview.sourceCount} / ${snapshot.overview.feedCount}`,
+      note: "Configured publishers and feed endpoints",
+      icon: Globe2,
+    },
+    {
+      label: "Articles / Stories",
+      value: `${snapshot.overview.articleCount} / ${snapshot.overview.storyCount}`,
+      note: "Canonical store coverage",
+      icon: Database,
+    },
+    {
+      label: "Projection Coverage",
+      value: `${snapshot.overview.syncedStoryCount}/${snapshot.overview.storyCount}`,
+      note: "Canonical stories present in Convex",
+      icon: RefreshCw,
+    },
+    {
+      label: "AI Queue",
+      value: `${snapshot.overview.aiJobsPending} pending / ${snapshot.overview.aiJobsLeased} leased`,
+      note: "Live AI workload",
+      icon: Bot,
+    },
+    {
+      label: "Held Summaries",
+      value: String(snapshot.overview.heldSummaryCount),
+      note: "Stories without a publishable summary",
+      icon: AlertTriangle,
+    },
+    {
+      label: "Suspicious Summaries",
+      value: String(snapshot.overview.suspiciousSummaryCount),
+      note: "Malformed summaries that need review",
+      icon: AlertTriangle,
+    },
   ] as const;
 
   return (
-    <>
-      <section className="panel" id="overview">
-        <div className="panel-head">
-          <h2>Overview</h2>
-          <p>Canonical store, projection sync, and AI runtime health.</p>
+    <div className="space-y-6">
+      <section id="overview">
+        <div className="mb-4 flex items-end justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-semibold tracking-tight text-stone-950">
+              Overview
+            </h2>
+            <p className="mt-1 text-sm text-stone-500">
+              Canonical store, projection sync, and AI runtime health.
+            </p>
+          </div>
+          <Badge variant="muted">Updates every 5s</Badge>
         </div>
-        <div className="health-grid">
-          {healthRows.map(([label, value, note]) => (
-            <div className="health-cell" key={label}>
-              <span>{label}</span>
-              <strong>{value}</strong>
-              <em>{note}</em>
-            </div>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {healthRows.map((item) => (
+            <Card key={item.label} className="overflow-hidden">
+              <CardHeader className="pb-4">
+                <div className="flex items-center justify-between">
+                  <Badge variant="muted">{item.label}</Badge>
+                  <item.icon className="size-4 text-stone-400" />
+                </div>
+                <CardTitle className="text-3xl font-semibold tracking-tight">
+                  {item.value}
+                </CardTitle>
+                <CardDescription className="leading-6">
+                  {item.note}
+                </CardDescription>
+              </CardHeader>
+            </Card>
           ))}
         </div>
       </section>
 
-      <section className="panel" id="sources">
-        <div className="panel-head">
-          <h2>Sources</h2>
-          <p>Recent source feed health and crawl policy state.</p>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Source</th>
-              <th>Feed</th>
-              <th>Policy</th>
-              <th>Validation</th>
-              <th>Last Fetch</th>
-            </tr>
-          </thead>
-          <tbody>
-            {snapshot.sourceFeeds.map((feed) => (
-              <tr key={feed.feedId}>
-                <td>
-                  <strong>{feed.sourceName}</strong>
-                  <div className="subtle">{feed.domain}</div>
-                  <div className="subtle">
-                    {feed.countryCode ?? "??"} · {feed.primaryLanguage ?? "?"}
-                  </div>
-                </td>
-                <td className="mono">{feed.feedUrl}</td>
-                <td>
-                  <span className="status-chip">
-                    {feed.rssOnly ? "rss only" : "crawl allowed"}
-                  </span>
-                  <span className="status-chip">
-                    {feed.noSnippet ? "no snippet" : "snippet ok"}
-                  </span>
-                  <span className="status-chip danger">
-                    {feed.doNotCrawl ? "do not crawl" : "active"}
-                  </span>
-                </td>
-                <td>{feed.validationState ?? "unknown"}</td>
-                <td>{formatTimestamp(feed.lastFetchedAt)}</td>
+      <Card id="sources">
+        <CardHeader>
+          <CardTitle>Sources</CardTitle>
+          <CardDescription>
+            Recent source feed health and crawl policy state.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="overflow-x-auto">
+          <table className="min-w-full border-separate border-spacing-0">
+            <thead>
+              <tr className="border-b border-stone-200">
+                <TableHeader>Source</TableHeader>
+                <TableHeader>Feed</TableHeader>
+                <TableHeader>Policy</TableHeader>
+                <TableHeader>Validation</TableHeader>
+                <TableHeader>Last Fetch</TableHeader>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
+            </thead>
+            <tbody>
+              {snapshot.sourceFeeds.map((feed) => (
+                <tr
+                  key={feed.feedId}
+                  className="border-t border-stone-100 even:bg-stone-50/60"
+                >
+                  <TableCell>
+                    <div className="space-y-1">
+                      <div className="font-semibold text-stone-900">
+                        {feed.sourceName}
+                      </div>
+                      <div className="font-mono text-xs text-stone-500">
+                        {feed.domain}
+                      </div>
+                      <div className="text-xs uppercase tracking-[0.18em] text-stone-400">
+                        {feed.countryCode ?? "??"} ·{" "}
+                        {feed.primaryLanguage ?? "?"}
+                      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="max-w-sm break-all font-mono text-xs text-stone-500">
+                      {feed.feedUrl}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-2">
+                      <Badge variant="muted">
+                        {feed.rssOnly ? "RSS only" : "crawl allowed"}
+                      </Badge>
+                      <Badge variant="muted">
+                        {feed.noSnippet ? "no snippet" : "snippet ok"}
+                      </Badge>
+                      <Badge
+                        variant={feed.doNotCrawl ? "destructive" : "success"}
+                      >
+                        {feed.doNotCrawl ? "do not crawl" : "active"}
+                      </Badge>
+                    </div>
+                  </TableCell>
+                  <TableCell>{feed.validationState ?? "unknown"}</TableCell>
+                  <TableCell>{formatTimestamp(feed.lastFetchedAt)}</TableCell>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
 
-      <section className="panel" id="jobs">
-        <div className="panel-head">
-          <h2>AI Jobs</h2>
-          <p>Recent AI lease and completion state from Neon.</p>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Job</th>
-              <th>Status</th>
-              <th>Attempts</th>
-              <th>Lease</th>
-              <th>Updated</th>
-            </tr>
-          </thead>
-          <tbody>
-            {snapshot.aiJobs.map((job) => (
-              <tr key={job.id}>
-                <td>
-                  <strong>{job.type}</strong>
-                  <div className="subtle mono">{job.id}</div>
-                </td>
-                <td>
-                  <span
-                    className={`status-chip ${job.status.includes("failed") ? "danger" : ""}`}
-                  >
-                    {formatStatus(job.status)}
-                  </span>
-                  {job.lastError ? (
-                    <div className="subtle">{job.lastError}</div>
-                  ) : null}
-                </td>
-                <td>
-                  p{job.priority} · {job.attempts}
-                </td>
-                <td>
-                  {job.leasedBy ?? "unleased"}
-                  <div className="subtle">
-                    {formatTimestamp(job.leaseExpiresAt)}
-                  </div>
-                </td>
-                <td>{formatTimestamp(job.updatedAt)}</td>
+      <Card id="jobs">
+        <CardHeader>
+          <CardTitle>AI Jobs</CardTitle>
+          <CardDescription>
+            Recent AI lease and completion state from Neon.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="overflow-x-auto">
+          <table className="min-w-full border-separate border-spacing-0">
+            <thead>
+              <tr>
+                <TableHeader>Job</TableHeader>
+                <TableHeader>Status</TableHeader>
+                <TableHeader>Attempts</TableHeader>
+                <TableHeader>Lease</TableHeader>
+                <TableHeader>Updated</TableHeader>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
+            </thead>
+            <tbody>
+              {snapshot.aiJobs.map((job) => (
+                <tr
+                  key={job.id}
+                  className="border-t border-stone-100 even:bg-stone-50/60"
+                >
+                  <TableCell>
+                    <div className="space-y-1">
+                      <div className="font-semibold text-stone-900">
+                        {job.type}
+                      </div>
+                      <div className="font-mono text-xs text-stone-500">
+                        {job.id}
+                      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="space-y-2">
+                      <Badge variant={statusVariant(job.status)}>
+                        {formatStatus(job.status)}
+                      </Badge>
+                      {job.lastError ? (
+                        <div className="max-w-sm text-xs leading-5 text-rose-700">
+                          {job.lastError}
+                        </div>
+                      ) : null}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="font-medium text-stone-900">
+                      p{job.priority} · {job.attempts}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="space-y-1">
+                      <div>{job.leasedBy ?? "unleased"}</div>
+                      <div className="text-xs text-stone-500">
+                        {formatTimestamp(job.leaseExpiresAt)}
+                      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell>{formatTimestamp(job.updatedAt)}</TableCell>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
 
-      <section className="panel" id="sync">
-        <div className="panel-head">
-          <h2>Story Sync</h2>
-          <p>Canonical stories, summaries, and Convex projection presence.</p>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Story</th>
-              <th>Summary</th>
-              <th>Projection</th>
-              <th>Last Seen</th>
-            </tr>
-          </thead>
-          <tbody>
-            {snapshot.storySync.map((story) => (
-              <tr key={story.storyId}>
-                <td>
-                  <strong>{story.title}</strong>
-                  <div className="subtle mono">{story.storyId}</div>
-                </td>
-                <td>
-                  <span
-                    className={`status-chip ${story.suspiciousSummary ? "danger" : ""}`}
-                  >
-                    {story.hasSummary ? "present" : "missing"}
-                  </span>
-                </td>
-                <td>
-                  <span className="status-chip">
-                    {story.projected ? "projected" : "missing"}
-                  </span>
-                </td>
-                <td>{formatTimestamp(story.lastSeenAt)}</td>
+      <Card id="sync">
+        <CardHeader>
+          <CardTitle>Story Sync</CardTitle>
+          <CardDescription>
+            Canonical stories, summaries, and Convex projection presence.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="overflow-x-auto">
+          <table className="min-w-full border-separate border-spacing-0">
+            <thead>
+              <tr>
+                <TableHeader>Story</TableHeader>
+                <TableHeader>Summary</TableHeader>
+                <TableHeader>Projection</TableHeader>
+                <TableHeader>Last Seen</TableHeader>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
-    </>
+            </thead>
+            <tbody>
+              {snapshot.storySync.map((story) => (
+                <tr
+                  key={story.storyId}
+                  className="border-t border-stone-100 even:bg-stone-50/60"
+                >
+                  <TableCell>
+                    <div className="space-y-1">
+                      <div className="font-semibold text-stone-900">
+                        {story.title}
+                      </div>
+                      <div className="font-mono text-xs text-stone-500">
+                        {story.storyId}
+                      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <Badge
+                      variant={
+                        story.suspiciousSummary
+                          ? "destructive"
+                          : story.hasSummary
+                            ? "success"
+                            : "muted"
+                      }
+                    >
+                      {story.hasSummary ? "present" : "missing"}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={story.projected ? "success" : "muted"}>
+                      {story.projected ? "projected" : "missing"}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>{formatTimestamp(story.lastSeenAt)}</TableCell>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

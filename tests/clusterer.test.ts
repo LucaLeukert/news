@@ -12,6 +12,7 @@ describe("story clustering score", () => {
       canonicalUrl: "https://a.test/story",
       title: "Central bank weighs slower rate path after inflation data",
       entityKeys: ["central-bank", "inflation"],
+      focusTokens: ["central", "bank", "inflation"],
       publishedAt: "2026-04-22T06:00:00Z",
     };
     const b = {
@@ -19,6 +20,7 @@ describe("story clustering score", () => {
       canonicalUrl: "https://b.test/story",
       title: "Inflation data pushes central bank toward slower rate moves",
       entityKeys: ["central-bank", "inflation"],
+      focusTokens: ["central", "bank", "inflation"],
       publishedAt: "2026-04-22T08:00:00Z",
     };
     const c = {
@@ -26,6 +28,7 @@ describe("story clustering score", () => {
       canonicalUrl: "https://c.test/story",
       title: "Football club signs new goalkeeper",
       entityKeys: ["football-club"],
+      focusTokens: ["football", "goalkeeper"],
       publishedAt: "2026-04-22T08:00:00Z",
     };
 
@@ -147,16 +150,61 @@ describe("clusterArticles", () => {
           secondId,
           "Trump welcomes British monarch during White House visit",
           {
-            semanticFingerprint: "British king meets US president in Washington",
+            semanticFingerprint:
+              "British king meets US president in Washington",
           },
         ),
       ],
       {
-        semanticPairScores: new Map([[semanticPairKey(firstId, secondId), 0.76]]),
+        semanticPairScores: new Map([
+          [semanticPairKey(firstId, secondId), 0.86],
+        ]),
       },
     );
 
     expect(clusters).toHaveLength(1);
     expect(clusters[0]?.articles).toHaveLength(2);
+  });
+
+  it("does not cluster broad market/oil coverage that only overlaps topically", () => {
+    const firstId = "00000000-0000-4000-8000-000000000501";
+    const secondId = "00000000-0000-4000-8000-000000000502";
+    const thirdId = "00000000-0000-4000-8000-000000000503";
+
+    const clusters = clusterArticles(
+      [
+        article(firstId, "Rohöl kostet schon wieder mehr als 110 Dollar", {
+          language: "de",
+          semanticCuePhrases: ["iran krieg oelpreis"],
+          aiEntityKeys: ["iran", "krieg"],
+          semanticFingerprint: "rohöl preis steigt auf 110 dollar",
+        }),
+        article(
+          secondId,
+          "Ölkonzern BP profitiert stark von Ölpreisschock durch Iran-Krieg",
+          {
+            language: "de",
+            semanticCuePhrases: ["bp gewinn iran krieg"],
+            aiEntityKeys: ["bp", "iran", "krieg"],
+            semanticFingerprint: "bp verdoppelt gewinn durch hohe ölpreise",
+          },
+        ),
+        article(thirdId, "Marktbericht: Aktien- und Ölmärkte ernüchtert", {
+          language: "de",
+          semanticCuePhrases: ["iran krieg dax oelmarkt"],
+          aiEntityKeys: ["iran", "krieg", "dax"],
+          semanticFingerprint: "dax schwach wegen teurerem oel",
+        }),
+      ],
+      {
+        semanticPairScores: new Map([
+          [semanticPairKey(firstId, secondId), 0.74],
+          [semanticPairKey(firstId, thirdId), 0.71],
+          [semanticPairKey(secondId, thirdId), 0.69],
+        ]),
+      },
+    );
+
+    expect(clusters).toHaveLength(3);
   });
 });

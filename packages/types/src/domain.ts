@@ -47,6 +47,15 @@ export const crawlValidationStateSchema = Schema.Literals([
 ]);
 export type CrawlValidationState = typeof crawlValidationStateSchema.Type;
 
+export const failedVerificationReingestStatusSchema = Schema.Literals([
+  "rss_mismatch_title",
+  "rss_mismatch_date",
+  "canonical_failed",
+  "extraction_failed",
+]);
+export type FailedVerificationReingestStatus =
+  typeof failedVerificationReingestStatusSchema.Type;
+
 export const taxonomyBucketSchema = Schema.Literals(TAXONOMY_BUCKETS);
 export type TaxonomyBucket = typeof taxonomyBucketSchema.Type;
 
@@ -165,7 +174,7 @@ export const crawlEnqueueRequestSchema = Schema.Struct({
 export type CrawlEnqueueRequest = typeof crawlEnqueueRequestSchema.Type;
 
 export const reingestFailedVerificationRequestSchema = Schema.Struct({
-  statuses: Schema.Array(crawlValidationStateSchema),
+  statuses: Schema.Array(failedVerificationReingestStatusSchema),
   sourceDomain: Schema.NullOr(Schema.String),
   limit: nonNegativeInteger,
   overrideTitleMismatches: Schema.Boolean,
@@ -185,6 +194,35 @@ export const reingestFailedVerificationResultSchema = Schema.Struct({
 });
 export type ReingestFailedVerificationResult =
   typeof reingestFailedVerificationResultSchema.Type;
+
+export const manualArticleIntakeRequestSchema = Schema.Struct({
+  urls: Schema.Array(urlString),
+});
+export type ManualArticleIntakeRequest =
+  typeof manualArticleIntakeRequestSchema.Type;
+
+export const manualArticleIntakeResultSchema = Schema.Struct({
+  processed: Schema.Array(
+    Schema.Struct({
+      requestedUrl: urlString,
+      canonicalUrl: urlString,
+      articleId: uuidString,
+      sourceId: uuidString,
+      title: Schema.String,
+    }),
+  ),
+  failures: Schema.Array(
+    Schema.Struct({
+      requestedUrl: urlString,
+      error: Schema.String,
+    }),
+  ),
+  articleAiJobCount: nonNegativeInteger,
+  sourceAiJobCount: nonNegativeInteger,
+  storyCount: nonNegativeInteger,
+});
+export type ManualArticleIntakeResult =
+  typeof manualArticleIntakeResultSchema.Type;
 
 export const aiJobTypeSchema = Schema.Literals([
   "article_extraction_qa",
@@ -578,6 +616,74 @@ export const adminAiJobSchema = Schema.Struct({
 });
 export type AdminAiJob = typeof adminAiJobSchema.Type;
 
+export const adminAiJobListItemSchema = Schema.Struct({
+  id: uuidString,
+  type: aiJobTypeSchema,
+  status: aiJobStatusSchema,
+  priority: nonNegativeInteger,
+  attempts: nonNegativeInteger,
+  leasedBy: Schema.NullOr(Schema.String),
+  leaseExpiresAt: Schema.NullOr(dateTimeString),
+  lastError: Schema.NullOr(Schema.String),
+  createdAt: dateTimeString,
+  updatedAt: dateTimeString,
+  inputArtifactIds: Schema.Array(Schema.String),
+  latestResultAt: Schema.NullOr(dateTimeString),
+  latestResultValidationStatus: Schema.NullOr(Schema.String),
+  eventCount: nonNegativeInteger,
+});
+export type AdminAiJobListItem = typeof adminAiJobListItemSchema.Type;
+
+export const adminAiJobEventSchema = Schema.Struct({
+  id: uuidString,
+  jobId: uuidString,
+  attemptNumber: nonNegativeInteger,
+  level: Schema.Literals(["info", "warn", "error"]),
+  eventType: nonEmptyString,
+  message: nonEmptyString,
+  details: Schema.Unknown,
+  createdAt: dateTimeString,
+});
+export type AdminAiJobEvent = typeof adminAiJobEventSchema.Type;
+
+export const adminAiJobResultSchema = Schema.Struct({
+  id: uuidString,
+  jobId: uuidString,
+  modelName: nonEmptyString,
+  modelVersion: nonEmptyString,
+  promptVersion: nonEmptyString,
+  inputArtifactIds: Schema.Array(Schema.String),
+  outputSchemaVersion: nonEmptyString,
+  structuredOutput: Schema.Unknown,
+  confidence: Schema.Number,
+  reasons: Schema.Array(Schema.String),
+  citationsToInputIds: Schema.Array(Schema.String),
+  validationStatus: nonEmptyString,
+  latencyMs: nonNegativeInteger,
+  createdAt: dateTimeString,
+});
+export type AdminAiJobResult = typeof adminAiJobResultSchema.Type;
+
+export const adminAiJobDetailSchema = Schema.Struct({
+  job: Schema.Struct({
+    id: uuidString,
+    type: aiJobTypeSchema,
+    status: aiJobStatusSchema,
+    priority: nonNegativeInteger,
+    attempts: nonNegativeInteger,
+    leasedBy: Schema.NullOr(Schema.String),
+    leaseExpiresAt: Schema.NullOr(dateTimeString),
+    lastError: Schema.NullOr(Schema.String),
+    createdAt: dateTimeString,
+    updatedAt: dateTimeString,
+    payload: Schema.Unknown,
+    inputArtifactIds: Schema.Array(Schema.String),
+  }),
+  results: Schema.Array(adminAiJobResultSchema),
+  events: Schema.Array(adminAiJobEventSchema),
+});
+export type AdminAiJobDetail = typeof adminAiJobDetailSchema.Type;
+
 export const adminStorySyncStatusSchema = Schema.Struct({
   storyId: uuidString,
   title: Schema.String.check(Schema.isMinLength(1)).check(
@@ -605,6 +711,11 @@ export const syncPublicStoryProjectionsRequestSchema = Schema.Struct({
 });
 export type SyncPublicStoryProjectionsRequest =
   typeof syncPublicStoryProjectionsRequestSchema.Type;
+
+export const adminAiJobQuerySchema = Schema.Struct({
+  limit: Schema.optionalKey(nonNegativeInteger),
+});
+export type AdminAiJobQuery = typeof adminAiJobQuerySchema.Type;
 
 export const userFollowTargetTypeSchema = Schema.Literals([
   "topic",
@@ -658,7 +769,10 @@ export function publicConfidenceState(confidence: number) {
 }
 
 export function normalizeNarrativeText(value: string) {
-  return value.replace(/\s+/gu, " ").replace(/\u00a0/gu, " ").trim();
+  return value
+    .replace(/\s+/gu, " ")
+    .replace(/\u00a0/gu, " ")
+    .trim();
 }
 
 export function looksLikePlaceholderText(value: string) {
@@ -715,7 +829,9 @@ export function shouldTreatArticleExtractionAsValid(
   );
 }
 
-export function storySummaryLooksSuspicious(summary: StorySummaryOutput | StorySummary) {
+export function storySummaryLooksSuspicious(
+  summary: StorySummaryOutput | StorySummary,
+) {
   const lines = [
     summary.neutralSummary,
     ...summary.agreed,
@@ -732,7 +848,28 @@ export function storySummaryLooksSuspicious(summary: StorySummaryOutput | StoryS
     return true;
   }
 
-  return lines.some((line) => /�|[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(line));
+  return lines.some((line) => {
+    if (line.includes("�")) {
+      return true;
+    }
+
+    for (const character of line) {
+      const codePoint = character.codePointAt(0);
+      if (codePoint === undefined) {
+        continue;
+      }
+      if (
+        (codePoint >= 0x0 && codePoint <= 0x8) ||
+        codePoint === 0xb ||
+        codePoint === 0xc ||
+        (codePoint >= 0xe && codePoint <= 0x1f)
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  });
 }
 
 export class DomainValidationError extends Data.TaggedError(

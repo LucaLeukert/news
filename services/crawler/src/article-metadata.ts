@@ -1,8 +1,8 @@
 import { extractMetadataEffect } from "@news/crawler-core";
 import {
+  CrawlerHttpLive,
   Article as NewspaperArticle,
   Configuration as NewspaperConfiguration,
-  CrawlerHttpLive,
 } from "@news/newspaper";
 import { Effect } from "effect";
 

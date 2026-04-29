@@ -1,16 +1,4 @@
 import {
-  articleWithPublisherSchema,
-  coverageDistributionSchema,
-  decodeUnknownSync,
-  sourceSchema,
-  storySummarySchema,
-  type ArticleWithPublisher,
-  type Source,
-  type Story,
-  type StoryListQuery,
-  normalizeUrl,
-} from "@news/types";
-import {
   articles,
   createDb,
   entities,
@@ -21,6 +9,18 @@ import {
   storyEntities,
   storyMetrics,
 } from "@news/db";
+import {
+  type ArticleWithPublisher,
+  type Source,
+  type Story,
+  type StoryListQuery,
+  articleWithPublisherSchema,
+  coverageDistributionSchema,
+  decodeUnknownSync,
+  normalizeUrl,
+  sourceSchema,
+  storySummarySchema,
+} from "@news/types";
 import { and, desc, eq, inArray, or } from "drizzle-orm";
 import { Context, Data, DateTime, Effect, Layer } from "effect";
 import { demoArticles, demoStory } from "./fixtures";
@@ -132,7 +132,9 @@ function matchesText(value: string | null | undefined, query: string) {
 
 const decodeSummary = decodeUnknownSync(storySummarySchema);
 const decodeCoverage = decodeUnknownSync(coverageDistributionSchema);
-const decodeArticleWithPublisher = decodeUnknownSync(articleWithPublisherSchema);
+const decodeArticleWithPublisher = decodeUnknownSync(
+  articleWithPublisherSchema,
+);
 const decodeSource = decodeUnknownSync(sourceSchema);
 
 const emptyCoverage = decodeCoverage({
@@ -197,10 +199,7 @@ const tryRepository = <A>(message: string, try_: () => Promise<A>) =>
     catch: (cause) => new RepositoryError({ message, cause }),
   });
 
-const matchingStoryIdsForQuery = (
-  databaseUrl: string,
-  query: StoryListQuery,
-) =>
+const matchingStoryIdsForQuery = (databaseUrl: string, query: StoryListQuery) =>
   Effect.gen(function* () {
     if (!query.country && !query.language && !query.source && !query.entity) {
       return null;
@@ -224,7 +223,9 @@ const matchingStoryIdsForQuery = (
             .from(storyArticles)
             .innerJoin(articles, eq(storyArticles.articleId, articles.id))
             .innerJoin(sources, eq(articles.sourceId, sources.id))
-            .where(articleFilters.length > 0 ? and(...articleFilters) : undefined),
+            .where(
+              articleFilters.length > 0 ? and(...articleFilters) : undefined,
+            ),
       );
 
       for (const row of articleRows) {
@@ -269,7 +270,9 @@ const matchingStoryIdsForQuery = (
     return storyIds;
   });
 
-export function makePostgresRepository(databaseUrl: string): NewsRepositoryShape {
+export function makePostgresRepository(
+  databaseUrl: string,
+): NewsRepositoryShape {
   return {
     listStories(query) {
       return Effect.gen(function* () {
@@ -308,16 +311,18 @@ export function makePostgresRepository(databaseUrl: string): NewsRepositoryShape
     getStory(id) {
       return Effect.gen(function* () {
         const db = createDb(databaseUrl);
-        const storyRows = yield* tryRepository(`Failed to load story ${id}`, () =>
-          db
-            .select({
-              story: stories,
-              metrics: storyMetrics,
-            })
-            .from(stories)
-            .leftJoin(storyMetrics, eq(stories.id, storyMetrics.storyId))
-            .where(eq(stories.id, id))
-            .limit(1),
+        const storyRows = yield* tryRepository(
+          `Failed to load story ${id}`,
+          () =>
+            db
+              .select({
+                story: stories,
+                metrics: storyMetrics,
+              })
+              .from(stories)
+              .leftJoin(storyMetrics, eq(stories.id, storyMetrics.storyId))
+              .where(eq(stories.id, id))
+              .limit(1),
         );
 
         const row = storyRows[0];
@@ -370,8 +375,9 @@ export function makePostgresRepository(databaseUrl: string): NewsRepositoryShape
     getSource(id) {
       return Effect.gen(function* () {
         const db = createDb(databaseUrl);
-        const sourceRows = yield* tryRepository(`Failed to load source ${id}`, () =>
-          db.select().from(sources).where(eq(sources.id, id)).limit(1),
+        const sourceRows = yield* tryRepository(
+          `Failed to load source ${id}`,
+          () => db.select().from(sources).where(eq(sources.id, id)).limit(1),
         );
         const source = sourceRows[0];
 

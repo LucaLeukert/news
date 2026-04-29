@@ -1,9 +1,8 @@
-import { type ServerEnv, loadServerEnv } from "@news/env";
 import {
   PROMPT_VERSIONS,
   StructuredAiLive,
-  articleExtractionQaPrompt,
   aiSchemasByJobType,
+  articleExtractionQaPrompt,
   biasContextPrompt,
   claimExtractionPrompt,
   factualityReliabilityPrompt,
@@ -20,6 +19,7 @@ import {
   validationReasonsForStructuredOutput,
   validationStatusForStructuredOutput,
 } from "@news/ai";
+import { type ServerEnv, loadServerEnv } from "@news/env";
 import {
   MetricsService,
   NewsRpcClient,
@@ -46,11 +46,7 @@ const leaseJob = (nodeId: string, model?: string) =>
     return yield* rpc.leaseAiJob({ nodeId, model });
   });
 
-const leaseBatch = (
-  nodeId: string,
-  model: string,
-  maxJobs: number,
-) =>
+const leaseBatch = (nodeId: string, model: string, maxJobs: number) =>
   Effect.gen(function* () {
     const jobs: LeasedAiJob[] = [];
     for (let index = 0; index < maxJobs; index += 1) {
@@ -188,19 +184,21 @@ const completeJob = (env: ServerEnv, job: LeasedAiJob) =>
                 ? error
                 : "unknown runner failure";
           yield* metrics.increment("ai.schema_failure", { jobType: job.type });
-          yield* rpc.failAiJob({
-            jobId: job.id,
-            error: `runner_failure:${message.slice(0, 3900)}`,
-          }).pipe(
-            Effect.catchIf(
-              () => true,
-              (rpcError: unknown) =>
-                Effect.logWarning("ai_runner.job.fail_submission_failed", {
-                  jobId: job.id,
-                  rpcError,
-                }),
-            ),
-          );
+          yield* rpc
+            .failAiJob({
+              jobId: job.id,
+              error: `runner_failure:${message.slice(0, 3900)}`,
+            })
+            .pipe(
+              Effect.catchIf(
+                () => true,
+                (rpcError: unknown) =>
+                  Effect.logWarning("ai_runner.job.fail_submission_failed", {
+                    jobId: job.id,
+                    rpcError,
+                  }),
+              ),
+            );
           yield* Effect.logWarning("ai_runner.job.failed", {
             jobId: job.id,
             error,

@@ -4,20 +4,20 @@ import {
   parseFeed,
   validateFeedItemAgainstPage,
 } from "@news/crawler-core";
+import { loadServerEnv } from "@news/env";
 import {
   HttpService,
   MetricsService,
   makeAppLayer,
   runMain,
 } from "@news/platform";
-import { loadServerEnv } from "@news/env";
 import { USER_AGENT } from "@news/types";
 import { Effect, Layer } from "effect";
 import { parseArticleWithNewspaper } from "./article-metadata";
-import { runSeededFeedIngestion, type SeedSourceInput } from "./pipeline";
+import { type SeedSourceInput, runSeededFeedIngestion } from "./pipeline";
 import {
-  reingestFailedVerificationArticles,
   type ReingestFailedVerificationInput,
+  reingestFailedVerificationArticles,
 } from "./reingest";
 
 export const ingestFeed = (feedUrl: string) =>
@@ -126,7 +126,9 @@ const reingestInputFromFlags = (
   statuses: (flags.get("statuses") ?? "rss_mismatch_title,rss_mismatch_date")
     .split(",")
     .map((value) => value.trim())
-    .filter((value) => value.length > 0) as ReingestFailedVerificationInput["statuses"],
+    .filter(
+      (value) => value.length > 0,
+    ) as ReingestFailedVerificationInput["statuses"],
   sourceDomain: flags.get("source-domain") ?? null,
   limit: flags.get("limit") ? Number(flags.get("limit")) : 100,
   overrideTitleMismatches: flags.get("override-title-mismatches") === "true",
@@ -167,22 +169,22 @@ if (import.meta.main) {
     );
   } else if (args.positional[0] === "reingest-failed-verification") {
     if (!env.DATABASE_URL) {
-      throw new Error("DATABASE_URL is required for reingest-failed-verification");
+      throw new Error(
+        "DATABASE_URL is required for reingest-failed-verification",
+      );
     }
 
     const outcome = await runMain(
-      reingestFailedVerificationArticles(
-        env.DATABASE_URL,
-        {
-          ...reingestInputFromFlags(args.flags),
-          aiModelPolicy: activeModelPolicy,
-        },
-      ).pipe(Effect.provide(crawlerLayer)),
+      reingestFailedVerificationArticles(env.DATABASE_URL, {
+        ...reingestInputFromFlags(args.flags),
+        aiModelPolicy: activeModelPolicy,
+      }).pipe(Effect.provide(crawlerLayer)),
     );
     await runMain(
-      Effect.logInfo("crawler.reingest_failed_verification.completed", outcome).pipe(
-        Effect.provide(appLayer),
-      ),
+      Effect.logInfo(
+        "crawler.reingest_failed_verification.completed",
+        outcome,
+      ).pipe(Effect.provide(appLayer)),
     );
   } else {
     const feedUrl = args.positional[0];
